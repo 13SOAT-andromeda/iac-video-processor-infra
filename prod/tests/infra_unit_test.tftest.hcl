@@ -78,6 +78,21 @@ run "cluster_reuses_lab_role_not_a_new_role" {
     condition     = local.cluster_name == "video-processor-eks-prod"
     error_message = "Expected cluster name to be video-processor-eks-prod (default environment)"
   }
+
+  assert {
+    condition     = data.aws_iam_role.lab_role.arn == "arn:aws:iam::123456789012:role/LabRole"
+    error_message = "Expected the mocked data.aws_iam_role.lab_role to resolve to the LabRole ARN that both cluster-level and node-group-level iam_role_arn derive from"
+  }
+
+  assert {
+    condition     = local.node_group_config.users.create_iam_role == false
+    error_message = "Expected the users node group to reuse an existing IAM role (create_iam_role = false) instead of creating a new one, since the Academy account lacks iam:CreateRole"
+  }
+
+  assert {
+    condition     = local.node_group_config.users.iam_role_arn == data.aws_iam_role.lab_role.arn
+    error_message = "Expected the users node group's iam_role_arn to reuse data.aws_iam_role.lab_role.arn (the LabRole), not a newly created role"
+  }
 }
 
 run "node_group_sizing_matches_spec" {
