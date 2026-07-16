@@ -33,9 +33,6 @@ data "aws_iam_role" "lab_role" {
 }
 
 locals {
-  # Fixed cross-repo contract (spec section 4) — NOT the per-environment
-  # naming convention used below for the cluster/ECR repo. iac-video-processor-data
-  # and iac-video-processor-gateway look this VPC up by this exact tag value.
   vpc_name = "video-processor-vpc"
 
   cluster_name = "video-processor-eks-${var.environment}"

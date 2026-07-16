@@ -5,12 +5,12 @@ output "vpc_id" {
 
 output "cluster_name" {
   description = "The name of the EKS cluster"
-  value       = module.eks.cluster_name
+  value       = aws_eks_cluster.this.name
 }
 
 output "cluster_endpoint" {
   description = "The EKS cluster API server endpoint"
-  value       = module.eks.cluster_endpoint
+  value       = aws_eks_cluster.this.endpoint
 }
 
 output "users_api_ecr_repository_url" {

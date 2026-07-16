@@ -6,28 +6,11 @@ mock_provider "aws" {
     }
   }
 
-  # The registry EKS module (via aws_iam_session_context) and ECR module (via
-  # aws_iam_policy_document) both feed the mocked provider's auto-generated
-  # placeholder values into fields with real format validation (ARN shape,
-  # valid JSON). Without these overrides, `terraform plan` fails before any
+  # The ECR module (via aws_iam_policy_document) feeds the mocked provider's
+  # auto-generated placeholder values into fields with real format validation
+  # (valid JSON). Without this override, `terraform plan` fails before any
   # assert block runs — this isn't a wiring bug in vpc.tf/eks.tf/ecr.tf, it's
-  # mock_provider needing valid-shaped inputs for these local/derived data
-  # sources.
-  mock_data "aws_caller_identity" {
-    defaults = {
-      account_id = "123456789012"
-      arn        = "arn:aws:iam::123456789012:role/LabRole"
-      id         = "123456789012"
-      user_id    = "AIDACKCEVSQ6C2EXAMPLE"
-    }
-  }
-
-  mock_data "aws_iam_session_context" {
-    defaults = {
-      issuer_arn = "arn:aws:iam::123456789012:role/LabRole"
-    }
-  }
-
+  # mock_provider needing valid-shaped inputs for this derived data source.
   mock_data "aws_iam_policy_document" {
     defaults = {
       json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}"
@@ -81,17 +64,17 @@ run "cluster_reuses_lab_role_not_a_new_role" {
 
   assert {
     condition     = data.aws_iam_role.lab_role.arn == "arn:aws:iam::123456789012:role/LabRole"
-    error_message = "Expected the mocked data.aws_iam_role.lab_role to resolve to the LabRole ARN that both cluster-level and node-group-level iam_role_arn derive from"
+    error_message = "Expected the mocked data.aws_iam_role.lab_role to resolve to the LabRole ARN that both cluster-level and node-group-level role_arn derive from"
   }
 
   assert {
-    condition     = local.node_group_config.users.create_iam_role == false
-    error_message = "Expected the users node group to reuse an existing IAM role (create_iam_role = false) instead of creating a new one, since the Academy account lacks iam:CreateRole"
+    condition     = aws_eks_cluster.this.role_arn == data.aws_iam_role.lab_role.arn
+    error_message = "Expected the cluster to reuse LabRole via role_arn instead of a module-created role, since the Academy account lacks iam:CreateRole"
   }
 
   assert {
-    condition     = local.node_group_config.users.iam_role_arn == data.aws_iam_role.lab_role.arn
-    error_message = "Expected the users node group's iam_role_arn to reuse data.aws_iam_role.lab_role.arn (the LabRole), not a newly created role"
+    condition     = aws_eks_node_group.users.node_role_arn == data.aws_iam_role.lab_role.arn
+    error_message = "Expected the users node group's node_role_arn to reuse data.aws_iam_role.lab_role.arn (the LabRole), not a newly created role"
   }
 }
 

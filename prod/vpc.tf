@@ -2,8 +2,6 @@ locals {
   vpc_cidr = "10.0.0.0/16"
   azs      = ["us-east-1a", "us-east-1b"]
 
-  # Mirrors iac-tech-challenge-infra/modules/vpc/main.tf's cidrsubnet offsets:
-  # private subnets get the low block, public subnets are offset by +4.
   private_subnet_cidrs = [for i in range(length(local.azs)) : cidrsubnet(local.vpc_cidr, 8, i)]
   public_subnet_cidrs  = [for i in range(length(local.azs)) : cidrsubnet(local.vpc_cidr, 8, i + 4)]
 }

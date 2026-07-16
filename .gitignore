@@ -6,6 +6,7 @@
 terraform.tfvars
 terraform.tfvars.json
 *.tfplan
+tfplan*.out
 
 # local development
 .aws-sam
