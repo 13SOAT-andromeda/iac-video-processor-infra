@@ -1,9 +1,10 @@
 # Spec — iac-video-processor-infra
 
-**Data:** 2026-07-11 (atualizado 2026-07-13 — EKS volta ao escopo; Ingress centralizado após revisão do mesmo dia; atualizado 2026-07-14 — pontos em aberto resolvidos, state locking, contratos de `dev/`; renomeado 2026-07-14 — futuro serviço `video-processor-api` passa a se chamar `video-processor-converter`)
+**Data:** 2026-07-11 (atualizado 2026-07-13 — EKS volta ao escopo; Ingress centralizado após revisão do mesmo dia; atualizado 2026-07-14 — pontos em aberto resolvidos, state locking, contratos de `dev/`; renomeado 2026-07-14 — futuro serviço `video-processor-api` passa a se chamar `video-processor-converter`; atualizado 2026-07-16 — tópico SNS para verificação de email, simplificação de credenciais de `users-api`; ADR-011)
 **Status:** Aprovado para virar plano de implementação
 **Repo antigo de referência:** `iac-tech-challenge-infra`
-**Spec guarda-chuva:** `docs/superpowers/specs/2026-07-11-video-processor-auth-infra-migration-design.md` (workspace raiz)
+**Spec guarda-chuva:** `docs/superpowers/specs/2026-07-11-video-processor-auth-infra-migration-design.md` (workspace raiz), atualizada em 2026-07-16
+**RFCs de origem da atualização 2026-07-16:** `RFC_service-authentication.md`, `RFC_service-users.md` (ADR-011)
 
 ---
 
@@ -73,6 +74,23 @@ LocalStack Community mocka a API do EKS (aceita `terraform apply` para `aws_eks_
 - **ECR:** um repositório por serviço containerizado (`video-processor-users-api` e futuros `video-processor-converter`/`links-generator`), lifecycle policy para não acumular imagens antigas indefinidamente (mesmo padrão do `modules/ecr` antigo). `authentication`/`authorizer` continuam Lambda via zip — sem ECR.
 - **Tag do ALB compartilhado (corrigido 2026-07-13):** `video-processor/alb = unified` — tag **determinística e exclusiva**, aplicada via annotation `alb.ingress.kubernetes.io/tags` no `Ingress` centralizado (seção 6), consumida pelo `iac-video-processor-gateway` via `data.aws_lb`. **Não** usar a tag genérica `kubernetes.io/cluster/video-processor-eks-prod = owned` para esse fim — ela é aplicada a qualquer ALB do cluster, e com mais de um ALB o `data.aws_lb` fica ambíguo (foi exatamente o bug que o `tech-challenge` corrigiu — ver seção 6).
 
+### 4.1 Tópico SNS de notificação (novo, 2026-07-16 — ADR-011)
+
+```hcl
+resource "aws_sns_topic" "notification" {
+  name = "video-processor-notification-topic"
+
+  tags = {
+    Project     = "video-processor"
+    Environment = var.environment
+  }
+}
+```
+
+Recurso nativo (sem módulo — um `aws_sns_topic` não justifica um módulo do Registry). Publicado por `video-processor-authentication-api` no fluxo de signup, para envio do email de verificação (ver aquele spec, seção 5.2) — a permissão `sns:Publish` é gerenciada no `terraform/` local daquele repo, via `data "aws_sns_topic"` (lookup cross-repo por nome), seguindo o mesmo padrão já estabelecido de "cada consumidor gerencia sua própria policy de acesso" (ver `iac-video-processor-data`, seção 8).
+
+**Sem assinatura SQS nesta fase** — não há, entre os 6 repos desta rodada, um serviço `notification-service` consumidor (diferente do `tech-challenge-fiap`, onde o tópico já tinha uma fila SQS assinada). O tópico fica publicável e funcional, mas sem consumidor até uma spec futura de `notification-service` assinar uma fila (ver spec guarda-chuva, seção 9).
+
 ---
 
 ## 5. LabRole (AWS Academy) — onde a role é de fato usada
@@ -94,6 +112,8 @@ data "aws_iam_role" "lab_role" {
 - **`create_kms_key = false`:** o repo antigo (`modules/eks/main.tf`) não configurava `encryption_config` no `aws_eks_cluster` — sem criptografia de secrets via KMS. Mantemos esse padrão (não criar uma KMS key nova) para reduzir a superfície de permissões exigidas no Academy; encryption at rest de secrets do cluster fica como débito técnico, não bloqueador nesta fase.
 
 **Resumo do contrato de IAM entre os repos:** só `iac-video-processor-infra` busca e usa `LabRole` via Terraform. `iac-video-processor-gateway` não usa IAM nenhuma. Os repos de serviço Lambda (`authentication`, `authorizer`) usam `LabRole` como execution role da própria função (mesmo padrão do repo antigo). `users-api` (e futuras APIs em EKS) não usam IAM role nenhuma diretamente — recebem credenciais de sessão via Kubernetes `Secret`, não via role.
+
+**Atualizado 2026-07-16 (ADR-011):** o escopo do que `users-api` precisa dessas credenciais de sessão **diminuiu** — antes cobria `dynamodb:PutItem/UpdateItem/DeleteItem/GetItem` em `auth-credentials` (escrita de credencial); agora `users-api` não toca mais em DynamoDB (virou Profile puro, RDS-only — ver `video-processor-users-api`, seção 1). A mesma sessão passa a ser usada só para `secretsmanager:GetSecretValue` no segredo `jwt-signing-key` (`users-api` passou a validar o JWT por conta própria — ver `video-processor-users-api`, seção 5.1) e para as credenciais de banco do RDS (via `Secret` separado, acesso de rede, não IAM). `authentication` ganha `sns:Publish` no tópico novo da seção 4.1, além do CRUD completo em `auth-credentials` que já tinha planejado como leitura-only na primeira versão deste spec.
 
 ---
 
