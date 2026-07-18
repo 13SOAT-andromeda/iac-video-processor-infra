@@ -1,10 +1,10 @@
 # Spec — iac-video-processor-infra
 
-**Data:** 2026-07-11 (atualizado 2026-07-13 — EKS volta ao escopo; Ingress centralizado após revisão do mesmo dia; atualizado 2026-07-14 — pontos em aberto resolvidos, state locking, contratos de `dev/`; renomeado 2026-07-14 — futuro serviço `video-processor-api` passa a se chamar `video-processor-converter`; atualizado 2026-07-16 — tópico SNS para verificação de email, simplificação de credenciais de `users-api`; ADR-011)
+**Data:** 2026-07-11 (atualizado 2026-07-13 — EKS volta ao escopo; Ingress centralizado após revisão do mesmo dia; atualizado 2026-07-14 — pontos em aberto resolvidos, state locking, contratos de `dev/`; renomeado 2026-07-14 — futuro serviço `video-processor-api` passa a se chamar `video-processor-converter`; atualizado 2026-07-16 — tópico SNS para verificação de email, simplificação de credenciais de `users-api`; ADR-011; atualizado 2026-07-18 — segundo par tópico/fila/DLQ para o evento de signup, fila de notificação com nome agnóstico de projeto; ADR-012)
 **Status:** Aprovado para virar plano de implementação
 **Repo antigo de referência:** `iac-tech-challenge-infra`
-**Spec guarda-chuva:** `docs/superpowers/specs/2026-07-11-video-processor-auth-infra-migration-design.md` (workspace raiz), atualizada em 2026-07-16
-**RFCs de origem da atualização 2026-07-16:** `RFC_service-authentication.md`, `RFC_service-users.md` (ADR-011)
+**Spec guarda-chuva:** `docs/superpowers/specs/2026-07-11-video-processor-auth-infra-migration-design.md` (workspace raiz), atualizada em 2026-07-18
+**RFCs de origem da atualização 2026-07-16:** `RFC_service-authentication.md`, `RFC_service-users.md` (ADR-011); reconciliação 2026-07-18 com `RFC_arquitetura-video-processing.md` (ver `docs/superpowers/specs/2026-07-18-notification-signup-integration-design.md`, ADR-012)
 
 ---
 
@@ -74,22 +74,108 @@ LocalStack Community mocka a API do EKS (aceita `terraform apply` para `aws_eks_
 - **ECR:** um repositório por serviço containerizado (`video-processor-users-api` e futuros `video-processor-converter`/`links-generator`), lifecycle policy para não acumular imagens antigas indefinidamente (mesmo padrão do `modules/ecr` antigo). `authentication`/`authorizer` continuam Lambda via zip — sem ECR.
 - **Tag do ALB compartilhado (corrigido 2026-07-13):** `video-processor/alb = unified` — tag **determinística e exclusiva**, aplicada via annotation `alb.ingress.kubernetes.io/tags` no `Ingress` centralizado (seção 6), consumida pelo `iac-video-processor-gateway` via `data.aws_lb`. **Não** usar a tag genérica `kubernetes.io/cluster/video-processor-eks-prod = owned` para esse fim — ela é aplicada a qualquer ALB do cluster, e com mais de um ALB o `data.aws_lb` fica ambíguo (foi exatamente o bug que o `tech-challenge` corrigiu — ver seção 6).
 
-### 4.1 Tópico SNS de notificação (novo, 2026-07-16 — ADR-011)
+### 4.1 Mensageria de signup — dois pares tópico/fila/DLQ (reescrito 2026-07-18 — ADR-012)
+
+**Substitui a versão anterior desta seção** (tópico único, só publish, sem consumidor). Ver `docs/superpowers/specs/2026-07-18-notification-signup-integration-design.md` para o desenho completo e o histórico de decisão. `notification-service` (repo `tech-challenge-notification-service`, reaproveitado) entra em escopo como consumidor real — deixa de ser "mensagem publicada sem consumidor".
+
+#### a) Notificação (email de verificação) — nome **agnóstico de projeto**
 
 ```hcl
-resource "aws_sns_topic" "notification" {
-  name = "video-processor-notification-topic"
+resource "aws_sns_topic" "notification_events" {
+  name = "notification-events-topic-${var.environment}"
 
   tags = {
     Project     = "video-processor"
     Environment = var.environment
   }
 }
+
+resource "aws_sqs_queue" "notification_events_dlq" {
+  name = "notification-events-queue-${var.environment}-dlq"
+}
+
+resource "aws_sqs_queue" "notification_events" {
+  name                       = "notification-events-queue-${var.environment}"
+  visibility_timeout_seconds = 180 # 6x o timeout da Lambda consumidora (30s)
+
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.notification_events_dlq.arn
+    maxReceiveCount      = 3
+  })
+}
+
+resource "aws_sns_topic_subscription" "notification_events" {
+  topic_arn = aws_sns_topic.notification_events.arn
+  protocol  = "sqs"
+  endpoint  = aws_sqs_queue.notification_events.arn
+  # SEM raw_message_delivery — o `ConsumeSQS` do notification-service (já em produção)
+  # espera o envelope SNS completo ({Message, MessageAttributes}) no body do SQS.
+}
+
+resource "aws_sqs_queue_policy" "notification_events" {
+  queue_url = aws_sqs_queue.notification_events.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "sns.amazonaws.com" }
+      Action    = "sqs:SendMessage"
+      Resource  = aws_sqs_queue.notification_events.arn
+      Condition = { ArnEquals = { "aws:SourceArn" = aws_sns_topic.notification_events.arn } }
+    }]
+  })
+}
 ```
 
-Recurso nativo (sem módulo — um `aws_sns_topic` não justifica um módulo do Registry). Publicado por `video-processor-authentication-api` no fluxo de signup, para envio do email de verificação (ver aquele spec, seção 5.2) — a permissão `sns:Publish` é gerenciada no `terraform/` local daquele repo, via `data "aws_sns_topic"` (lookup cross-repo por nome), seguindo o mesmo padrão já estabelecido de "cada consumidor gerencia sua própria policy de acesso" (ver `iac-video-processor-data`, seção 8).
+Sem prefixo `video-processor-` no nome — decisão deliberada (ADR-012): o `notification-service` é uma Lambda de propósito geral, reaproveitada entre múltiplos projetos, e seu Terraform já assume esse nome como default (`var.sqs_queue_name`). Nome **com** sufixo de ambiente (`-${var.environment}`), consistente com o resto deste repo — diferente do default do `notification-service` (sem sufixo), que por isso precisa receber `sqs_queue_name` explicitamente por ambiente no `terraform apply`/pipeline daquele repo. **Recursos equivalentes já existem, com código, em `iac-tech-challenge-infra`/`tech-challenge-fiap` — não são reaproveitados** (repo fora de escopo, não tocado nem lido como referência); estes são recursos **novos e independentes**, apesar do nome igual.
 
-**Sem assinatura SQS nesta fase** — não há, entre os 6 repos desta rodada, um serviço `notification-service` consumidor (diferente do `tech-challenge-fiap`, onde o tópico já tinha uma fila SQS assinada). O tópico fica publicável e funcional, mas sem consumidor até uma spec futura de `notification-service` assinar uma fila (ver spec guarda-chuva, seção 9).
+#### b) Evento de domínio `UserSignedUp` (signup → `users-api`, novo)
+
+```hcl
+resource "aws_sns_topic" "user_events" {
+  name = "video-processor-user-events-topic-${var.environment}"
+}
+
+resource "aws_sqs_queue" "user_events_dlq" {
+  name = "video-processor-user-events-queue-${var.environment}-dlq"
+}
+
+resource "aws_sqs_queue" "user_events" {
+  name                       = "video-processor-user-events-queue-${var.environment}"
+  visibility_timeout_seconds = 60 # worker faz só um INSERT idempotente
+
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.user_events_dlq.arn
+    maxReceiveCount      = 3
+  })
+}
+
+resource "aws_sns_topic_subscription" "user_events" {
+  topic_arn = aws_sns_topic.user_events.arn
+  protocol  = "sqs"
+  endpoint  = aws_sqs_queue.user_events.arn
+}
+
+resource "aws_sqs_queue_policy" "user_events" {
+  queue_url = aws_sqs_queue.user_events.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "sns.amazonaws.com" }
+      Action    = "sqs:SendMessage"
+      Resource  = aws_sqs_queue.user_events.arn
+      Condition = { ArnEquals = { "aws:SourceArn" = aws_sns_topic.user_events.arn } }
+    }]
+  })
+}
+```
+
+Este tópico mantém o prefixo `video-processor-` — é um evento de domínio específico deste projeto, diferente do de notificação (agnóstico, item a). Publicado por `video-processor-authentication-api` no signup (ver aquele spec, seção 5.2); consumido pelo worker novo de `video-processor-users-api` (ver aquele spec, seção 4.4).
+
+Ambos os pares seguem o mesmo padrão de "cada consumidor gerencia sua própria policy de acesso" (permissões `sns:Publish`/`sqs:ReceiveMessage` vivem nos `terraform/` locais de `authentication-api`/`users-api`, via `data source` cross-repo por nome — ver `iac-video-processor-data`, seção 8).
+
+Outputs novos: `notification_events_topic_arn`, `user_events_topic_arn` (para `authentication` publicar), `user_events_queue_arn` (para `users-api` consumir).
 
 ---
 
@@ -113,7 +199,7 @@ data "aws_iam_role" "lab_role" {
 
 **Resumo do contrato de IAM entre os repos:** só `iac-video-processor-infra` busca e usa `LabRole` via Terraform. `iac-video-processor-gateway` não usa IAM nenhuma. Os repos de serviço Lambda (`authentication`, `authorizer`) usam `LabRole` como execution role da própria função (mesmo padrão do repo antigo). `users-api` (e futuras APIs em EKS) não usam IAM role nenhuma diretamente — recebem credenciais de sessão via Kubernetes `Secret`, não via role.
 
-**Atualizado 2026-07-16 (ADR-011):** o escopo do que `users-api` precisa dessas credenciais de sessão **diminuiu** — antes cobria `dynamodb:PutItem/UpdateItem/DeleteItem/GetItem` em `auth-credentials` (escrita de credencial); agora `users-api` não toca mais em DynamoDB (virou Profile puro, RDS-only — ver `video-processor-users-api`, seção 1). A mesma sessão passa a ser usada só para `secretsmanager:GetSecretValue` no segredo `jwt-signing-key` (`users-api` passou a validar o JWT por conta própria — ver `video-processor-users-api`, seção 5.1) e para as credenciais de banco do RDS (via `Secret` separado, acesso de rede, não IAM). `authentication` ganha `sns:Publish` no tópico novo da seção 4.1, além do CRUD completo em `auth-credentials` que já tinha planejado como leitura-only na primeira versão deste spec.
+**Atualizado 2026-07-16 (ADR-011):** o escopo do que `users-api` precisa dessas credenciais de sessão **diminuiu** — antes cobria `dynamodb:PutItem/UpdateItem/DeleteItem/GetItem` em `auth-credentials` (escrita de credencial); agora `users-api` não toca mais em DynamoDB (virou Profile puro, RDS-only — ver `video-processor-users-api`, seção 1). A mesma sessão passa a ser usada só para `secretsmanager:GetSecretValue` no segredo `jwt-signing-key` (`users-api` passou a validar o JWT por conta própria — ver `video-processor-users-api`, seção 5.1) e para as credenciais de banco do RDS (via `Secret` separado, acesso de rede, não IAM). `authentication` ganha `sns:Publish` nos **dois** tópicos da seção 4.1 (atualizado 2026-07-18, ADR-012 — antes era um só), além do CRUD completo em `auth-credentials` que já tinha planejado como leitura-only na primeira versão deste spec. `users-api` ganha, via o worker novo (ADR-012), `sqs:ReceiveMessage`/`DeleteMessage`/`GetQueueAttributes` na fila `video-processor-user-events-queue-${var.environment}` (seção 4.1b) — primeira permissão SQS deste serviço.
 
 ---
 
