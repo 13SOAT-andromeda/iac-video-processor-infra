@@ -13,6 +13,11 @@ output "cluster_endpoint" {
   value       = aws_eks_cluster.this.endpoint
 }
 
+output "datadog_agent_helm_release_status" {
+  description = "Status of the Datadog Agent Helm release (deployed, failed, etc.)"
+  value       = helm_release.datadog.status
+}
+
 output "users_api_ecr_repository_url" {
   description = "The ECR repository URL for video-processor-users-api"
   value       = module.ecr_users_api.repository_url
