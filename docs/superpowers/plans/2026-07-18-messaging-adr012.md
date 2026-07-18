@@ -205,6 +205,8 @@ git commit -m "feat(prod): add notification-events and user-events SNS/SQS/DLQ p
 **Interfaces:**
 - Consumes: `aws_sns_topic.notification_events`, `aws_sqs_queue.notification_events`, `aws_sqs_queue.notification_events_dlq`, `aws_sns_topic_subscription.notification_events`, `aws_sqs_queue_policy.notification_events`, `aws_sns_topic.user_events`, `aws_sqs_queue.user_events`, `aws_sqs_queue.user_events_dlq`, `aws_sns_topic_subscription.user_events`, `aws_sqs_queue_policy.user_events` — all from Task 1.
 
+**Post-implementation note:** the `run` blocks below, exactly as written, fail under plain `command = plan` with `Unknown condition value` — `aws_sns_topic.arn`/`aws_sqs_queue.arn` are provider-computed and unknown-until-apply for resources with no prior state, independent of this file's `mock_provider` block (which only supplies `mock_data`, not `mock_resource`, for SNS/SQS). The implementation adds `override_resource { target = ...; values = { arn = "..." }; override_during = plan }` inside each new `run` block (not the shared `mock_provider`) to supply known ARNs for the three resources each block's assertions touch. This was verified (by both the task reviewer and the final branch reviewer, independently) to still catch real wiring regressions via mutation testing — it unblocks evaluation of computed values, it does not short-circuit the assertions.
+
 - [ ] **Step 1: Append two `run` blocks to `prod/tests/infra_unit_test.tftest.hcl`**
 
 Add before the final closing of the file (after the existing `ecr_repository_named_per_environment_convention` run block):
