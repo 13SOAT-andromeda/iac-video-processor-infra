@@ -18,7 +18,7 @@ resource "aws_sqs_queue" "notification_events_dlq" {
 
 resource "aws_sqs_queue" "notification_events" {
   name                       = "notification-events-queue-${var.environment}"
-  visibility_timeout_seconds = 180 # 6x the 30s consumer Lambda timeout
+  visibility_timeout_seconds = 180
 
   redrive_policy = jsonencode({
     deadLetterTargetArn = aws_sqs_queue.notification_events_dlq.arn
@@ -35,8 +35,6 @@ resource "aws_sns_topic_subscription" "notification_events" {
   topic_arn = aws_sns_topic.notification_events.arn
   protocol  = "sqs"
   endpoint  = aws_sqs_queue.notification_events.arn
-  # No raw_message_delivery — notification-service's ConsumeSQS expects the
-  # full SNS envelope ({Message, MessageAttributes}) in the SQS body.
 }
 
 resource "aws_sqs_queue_policy" "notification_events" {
@@ -73,7 +71,7 @@ resource "aws_sqs_queue" "user_events_dlq" {
 
 resource "aws_sqs_queue" "user_events" {
   name                       = "video-processor-user-events-queue-${var.environment}"
-  visibility_timeout_seconds = 60 # worker does a single idempotent INSERT
+  visibility_timeout_seconds = 60
 
   redrive_policy = jsonencode({
     deadLetterTargetArn = aws_sqs_queue.user_events_dlq.arn
