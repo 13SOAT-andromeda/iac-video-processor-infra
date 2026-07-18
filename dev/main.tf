@@ -6,6 +6,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 6.54"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.9"
+    }
   }
 
   backend "s3" {
@@ -45,6 +49,7 @@ provider "aws" {
     cloudwatchlogs = "http://localhost:4566"
     sns            = "http://localhost:4566"
     sqs            = "http://localhost:4566"
+    secretsmanager = "http://localhost:4566"
   }
 
   default_tags {
