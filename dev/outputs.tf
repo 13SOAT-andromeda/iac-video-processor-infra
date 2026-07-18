@@ -27,3 +27,13 @@ output "user_events_queue_arn" {
   description = "ARN of the video-processor-user-events SQS queue (consumed by video-processor-users-api's worker)"
   value       = aws_sqs_queue.user_events.arn
 }
+
+output "jwt_signing_key_secret_arn" {
+  description = "ARN of the jwt-signing-key secret (shared between authentication-api, authorizer, and users-api)"
+  value       = aws_secretsmanager_secret.jwt_signing_key.arn
+}
+
+output "jwt_signing_key_secret_name" {
+  description = "Name of the jwt-signing-key secret, for cross-repo lookup via data.aws_secretsmanager_secret"
+  value       = aws_secretsmanager_secret.jwt_signing_key.name
+}
