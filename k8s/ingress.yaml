@@ -20,3 +20,10 @@ spec:
                 name: video-processor-users-api-svc
                 port:
                   number: 80
+          - path: /links
+            pathType: Prefix
+            backend:
+              service:
+                name: video-processor-link-api-svc
+                port:
+                  number: 80

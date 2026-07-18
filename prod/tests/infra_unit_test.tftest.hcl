@@ -103,6 +103,30 @@ run "ecr_repository_named_per_environment_convention" {
     condition     = module.ecr_users_api.repository_name == "video-processor-users-api-prod"
     error_message = "Expected ECR repository name to follow the video-processor-users-api-${var.environment} convention"
   }
+
+  assert {
+    condition     = module.ecr_link_api.repository_name == "video-processor-link-api-prod"
+    error_message = "Expected ECR repository name to follow the video-processor-link-api-${var.environment} convention"
+  }
+}
+
+run "video_processing_status_queue_has_no_dlq_per_adr003" {
+  command = plan
+
+  assert {
+    condition     = aws_sqs_queue.video_processing_status.name == "video-processing-status-queue-prod"
+    error_message = "Expected the status queue to keep the architecture-spec contract name video-processing-status-queue + environment suffix"
+  }
+
+  # Note: the queue deliberately has NO redrive_policy/DLQ (ADR-003 v5
+  # addendum — links-service owns the state and handles consume errors
+  # internally). redrive_policy is Optional+Computed, so its absence cannot
+  # be asserted at plan time without an override that would defeat the check.
+
+  assert {
+    condition     = aws_sqs_queue.video_processing_status.visibility_timeout_seconds == 60
+    error_message = "Expected a 60s visibility timeout — links-service applies a fast idempotent DynamoDB transition per message"
+  }
 }
 
 run "notification_events_pair_named_and_wired_per_spec" {

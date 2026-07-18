@@ -103,3 +103,20 @@ resource "aws_sqs_queue_policy" "user_events" {
     }]
   })
 }
+
+# Fila de status de processamento de vídeo (etapa links — arquitetura §6).
+# Publicada pelo processing-worker (video-processor-converter) e pelo futuro
+# DLQ handler; consumida pelo links-service (video-processor-link-api, pod EKS,
+# consumer goroutine contínuo). Nome mantém o contrato da spec de arquitetura
+# (video-processing-status-queue) + sufixo de ambiente do repo.
+# Sem DLQ própria por decisão de arquitetura (ADR-003, adendo v5): o
+# links-service é o dono do estado e trata erros de consumo internamente.
+resource "aws_sqs_queue" "video_processing_status" {
+  name                       = "video-processing-status-queue-${var.environment}"
+  visibility_timeout_seconds = 60
+
+  tags = {
+    Project     = "video-processor"
+    Environment = var.environment
+  }
+}
