@@ -104,3 +104,146 @@ run "ecr_repository_named_per_environment_convention" {
     error_message = "Expected ECR repository name to follow the video-processor-users-api-${var.environment} convention"
   }
 }
+
+run "notification_events_pair_named_and_wired_per_spec" {
+  command = plan
+
+  # aws_sns_topic.arn / aws_sqs_queue.arn are Computed-only attributes: for a
+  # resource being created (not yet in state), the real AWS provider leaves
+  # them "known after apply", so command = plan alone can't resolve any
+  # assertion that reaches through them (redrive_policy's deadLetterTargetArn,
+  # the SNS subscription's endpoint, or the queue policy's SourceArn
+  # condition — all reference some other resource's .arn). override_resource
+  # with override_during = plan supplies a known arn for just these three
+  # resources, scoped to this run block only, so the plan-phase graph can
+  # resolve the derived values below without touching the shared
+  # mock_provider block or any other run block.
+  override_resource {
+    target = aws_sns_topic.notification_events
+    values = {
+      arn = "arn:aws:sns:us-east-1:123456789012:notification-events-topic-prod"
+    }
+    override_during = plan
+  }
+
+  override_resource {
+    target = aws_sqs_queue.notification_events
+    values = {
+      arn = "arn:aws:sqs:us-east-1:123456789012:notification-events-queue-prod"
+    }
+    override_during = plan
+  }
+
+  override_resource {
+    target = aws_sqs_queue.notification_events_dlq
+    values = {
+      arn = "arn:aws:sqs:us-east-1:123456789012:notification-events-queue-prod-dlq"
+    }
+    override_during = plan
+  }
+
+  assert {
+    condition     = aws_sns_topic.notification_events.name == "notification-events-topic-prod"
+    error_message = "Expected the notification SNS topic to be project-agnostic (no video-processor- prefix), per ADR-012"
+  }
+
+  assert {
+    condition     = aws_sqs_queue.notification_events.name == "notification-events-queue-prod"
+    error_message = "Expected the notification SQS queue name to match the notification-events-queue-${var.environment} convention"
+  }
+
+  assert {
+    condition     = aws_sqs_queue.notification_events_dlq.name == "notification-events-queue-prod-dlq"
+    error_message = "Expected the notification DLQ name to be the main queue name with a -dlq suffix"
+  }
+
+  assert {
+    condition     = aws_sqs_queue.notification_events.visibility_timeout_seconds == 180
+    error_message = "Expected the notification queue visibility timeout to be 180s (6x the 30s consumer Lambda timeout)"
+  }
+
+  assert {
+    condition     = jsondecode(aws_sqs_queue.notification_events.redrive_policy).deadLetterTargetArn == aws_sqs_queue.notification_events_dlq.arn
+    error_message = "Expected the notification queue's redrive_policy to point at its own DLQ arn, not some other queue"
+  }
+
+  assert {
+    condition     = jsondecode(aws_sqs_queue.notification_events.redrive_policy).maxReceiveCount == 3
+    error_message = "Expected maxReceiveCount to be 3 for the notification queue's redrive policy"
+  }
+
+  assert {
+    condition     = aws_sns_topic_subscription.notification_events.endpoint == aws_sqs_queue.notification_events.arn
+    error_message = "Expected the notification SNS subscription to point at the notification SQS queue, not a different queue"
+  }
+
+  assert {
+    condition     = jsondecode(aws_sqs_queue_policy.notification_events.policy).Statement[0].Condition.ArnEquals["aws:SourceArn"] == aws_sns_topic.notification_events.arn
+    error_message = "Expected the notification queue policy to scope SendMessage to its own topic's arn via aws:SourceArn"
+  }
+}
+
+run "user_events_pair_named_and_wired_per_spec" {
+  command = plan
+
+  # Same plan-time unknown-arn issue as the notification_events run block
+  # above — see the comment there for why these overrides are needed.
+  override_resource {
+    target = aws_sns_topic.user_events
+    values = {
+      arn = "arn:aws:sns:us-east-1:123456789012:video-processor-user-events-topic-prod"
+    }
+    override_during = plan
+  }
+
+  override_resource {
+    target = aws_sqs_queue.user_events
+    values = {
+      arn = "arn:aws:sqs:us-east-1:123456789012:video-processor-user-events-queue-prod"
+    }
+    override_during = plan
+  }
+
+  override_resource {
+    target = aws_sqs_queue.user_events_dlq
+    values = {
+      arn = "arn:aws:sqs:us-east-1:123456789012:video-processor-user-events-queue-prod-dlq"
+    }
+    override_during = plan
+  }
+
+  assert {
+    condition     = aws_sns_topic.user_events.name == "video-processor-user-events-topic-prod"
+    error_message = "Expected the user-events SNS topic to keep the video-processor- prefix (project-specific domain event), per ADR-012"
+  }
+
+  assert {
+    condition     = aws_sqs_queue.user_events.name == "video-processor-user-events-queue-prod"
+    error_message = "Expected the user-events SQS queue name to match the video-processor-user-events-queue-${var.environment} convention"
+  }
+
+  assert {
+    condition     = aws_sqs_queue.user_events_dlq.name == "video-processor-user-events-queue-prod-dlq"
+    error_message = "Expected the user-events DLQ name to be the main queue name with a -dlq suffix"
+  }
+
+  assert {
+    condition     = aws_sqs_queue.user_events.visibility_timeout_seconds == 60
+    error_message = "Expected the user-events queue visibility timeout to be 60s (worker does a single idempotent INSERT)"
+  }
+
+  assert {
+    condition     = jsondecode(aws_sqs_queue.user_events.redrive_policy).deadLetterTargetArn == aws_sqs_queue.user_events_dlq.arn
+    error_message = "Expected the user-events queue's redrive_policy to point at its own DLQ arn, not some other queue"
+  }
+
+  assert {
+    condition     = aws_sns_topic_subscription.user_events.endpoint == aws_sqs_queue.user_events.arn
+    error_message = "Expected the user-events SNS subscription to point at the user-events SQS queue, not a different queue"
+  }
+
+  assert {
+    condition     = jsondecode(aws_sqs_queue_policy.user_events.policy).Statement[0].Condition.ArnEquals["aws:SourceArn"] == aws_sns_topic.user_events.arn
+    error_message = "Expected the user-events queue policy to scope SendMessage to its own topic's arn via aws:SourceArn"
+  }
+}
