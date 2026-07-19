@@ -271,3 +271,92 @@ run "user_events_pair_named_and_wired_per_spec" {
     error_message = "Expected the user-events queue policy to scope SendMessage to its own topic's arn via aws:SourceArn"
   }
 }
+
+run "video_processing_pipeline_wired_per_converter_contract" {
+  command = plan
+
+  # Same plan-time unknown-arn issue as the notification_events run block
+  # above — see the comment there for why these overrides are needed.
+  override_resource {
+    target = aws_sqs_queue.video_processing
+    values = {
+      arn = "arn:aws:sqs:us-east-1:123456789012:video-processing-queue-prod"
+    }
+    override_during = plan
+  }
+
+  override_resource {
+    target = aws_sqs_queue.video_processing_dlq
+    values = {
+      arn = "arn:aws:sqs:us-east-1:123456789012:video-processing-dlq-prod"
+    }
+    override_during = plan
+  }
+
+  override_resource {
+    target = aws_s3_bucket.video_processor
+    values = {
+      arn = "arn:aws:s3:::video-processor-bucket-prod"
+    }
+    override_during = plan
+  }
+
+  assert {
+    condition     = aws_s3_bucket.video_processor.bucket == "video-processor-bucket-prod"
+    error_message = "Expected the video bucket to follow the video-processor-bucket-${var.environment} convention"
+  }
+
+  assert {
+    condition     = aws_sqs_queue.video_processing.name == "video-processing-queue-prod"
+    error_message = "Expected the main queue to keep the converter contract name video-processing-queue + environment suffix"
+  }
+
+  assert {
+    condition     = aws_sqs_queue.video_processing_dlq.name == "video-processing-dlq-prod"
+    error_message = "Expected the DLQ to keep the converter contract name video-processing-dlq + environment suffix"
+  }
+
+  assert {
+    condition     = aws_sqs_queue.video_processing.visibility_timeout_seconds == 1800
+    error_message = "Expected a 1800s visibility timeout — the processing-worker runs ffmpeg on potentially long videos"
+  }
+
+  assert {
+    condition     = jsondecode(aws_sqs_queue.video_processing.redrive_policy).deadLetterTargetArn == aws_sqs_queue.video_processing_dlq.arn
+    error_message = "Expected the main queue's redrive_policy to point at its own DLQ arn, not some other queue"
+  }
+
+  assert {
+    condition     = jsondecode(aws_sqs_queue.video_processing.redrive_policy).maxReceiveCount == 3
+    error_message = "Expected maxReceiveCount to be 3 for the main queue's redrive policy"
+  }
+
+  assert {
+    condition     = jsondecode(aws_sqs_queue_policy.video_processing.policy).Statement[0].Condition.ArnEquals["aws:SourceArn"] == aws_s3_bucket.video_processor.arn
+    error_message = "Expected the main queue policy to scope S3 SendMessage to the video bucket's arn via aws:SourceArn"
+  }
+
+  assert {
+    condition     = aws_s3_bucket_notification.video_processor.queue[0].queue_arn == aws_sqs_queue.video_processing.arn
+    error_message = "Expected the S3 notification to target the main video-processing queue"
+  }
+
+  assert {
+    condition     = aws_s3_bucket_notification.video_processor.queue[0].filter_suffix == ".mp4"
+    error_message = "Expected the S3 notification to filter on .mp4 so the processed/ zip does not re-trigger the worker"
+  }
+}
+
+run "worker_ecr_and_artifacts_bucket_named_per_convention" {
+  command = plan
+
+  assert {
+    condition     = module.ecr_worker.repository_name == "video-processor-worker-prod"
+    error_message = "Expected the worker ECR repository name to follow the video-processor-worker-${var.environment} convention (the converter's deploy.yml pushes to this name)"
+  }
+
+  assert {
+    condition     = aws_s3_bucket.artifacts.bucket == "video-processor-artifacts-prod"
+    error_message = "Expected the deploy-artifacts bucket to follow the video-processor-artifacts-${var.environment} convention (the converter's CD uploads dlq-handler zips here)"
+  }
+}
