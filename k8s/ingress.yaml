@@ -20,13 +20,10 @@ spec:
                 name: video-processor-users-api-svc
                 port:
                   number: 80
-          # Nota: fica /links (sem prefixo /api, diferente de /api/users) de
-          # propósito — o link-api expõe as rotas reais em /links, /links/:id
-          # etc (confirmado em testes ponta a ponta), sem prefixo /api. Se o
-          # padrão /api/* virar obrigatório pra todo serviço, o link-api
-          # precisa mudar suas próprias rotas Gin primeiro, senão o Ingress
-          # manda tráfego pra um path que o pod não reconhece (404 em tudo).
-          - path: /links
+          # /api/links: o link-api já registra as próprias rotas Gin sob
+          # /api/links/... (mesma convenção do /api/users), então o Ingress
+          # bate certo com o que o pod entende.
+          - path: /api/links
             pathType: Prefix
             backend:
               service:
