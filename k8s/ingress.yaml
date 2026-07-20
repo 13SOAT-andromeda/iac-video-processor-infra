@@ -7,13 +7,13 @@ metadata:
     alb.ingress.kubernetes.io/scheme: internal
     alb.ingress.kubernetes.io/target-type: ip
     alb.ingress.kubernetes.io/tags: video-processor/alb=unified
-    alb.ingress.kubernetes.io/healthcheck-path: /health
+    alb.ingress.kubernetes.io/healthcheck-path: /api/health
 spec:
   ingressClassName: alb
   rules:
     - http:
         paths:
-          - path: /users
+          - path: /api/users
             pathType: Prefix
             backend:
               service:
