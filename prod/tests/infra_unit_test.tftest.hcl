@@ -263,3 +263,30 @@ run "user_events_pair_named_and_wired_per_spec" {
     error_message = "Expected the user-events queue policy to scope SendMessage to its own topic's arn via aws:SourceArn"
   }
 }
+
+run "jwt_signing_key_secret_named_and_wired_per_spec" {
+  command = plan
+
+  override_resource {
+    target = random_password.jwt_signing_key
+    values = {
+      result = "mock-generated-password-value"
+    }
+    override_during = plan
+  }
+
+  assert {
+    condition     = aws_secretsmanager_secret.jwt_signing_key.name == "jwt-signing-key-prod"
+    error_message = "Expected the JWT signing key secret name to follow the jwt-signing-key-${var.environment} convention"
+  }
+
+  assert {
+    condition     = random_password.jwt_signing_key.length == 64
+    error_message = "Expected the generated JWT signing key to be 64 characters long"
+  }
+
+  assert {
+    condition     = aws_secretsmanager_secret_version.jwt_signing_key.secret_string == "mock-generated-password-value"
+    error_message = "Expected the secret version to store the random_password-generated value, not a hardcoded string"
+  }
+}

@@ -60,14 +60,19 @@ resource "helm_release" "datadog" {
     value = var.datadog_site
   }
 
+  # env fica como tag (convenção "unified service tagging" do Datadog — tags
+  # com a chave "env" alimentam o facet especial de ambiente na UI), não como
+  # datadog.env: esse campo do chart espera uma LISTA de variáveis extras
+  # ([{name: ..., value: ...}], estilo env do Kubernetes), não uma string —
+  # setar como string quebra o `range` do template Helm.
   set {
     name  = "datadog.tags[0]"
     value = "project:video-processor"
   }
 
   set {
-    name  = "datadog.env"
-    value = var.environment
+    name  = "datadog.tags[1]"
+    value = "env:${var.environment}"
   }
 
   # APM — recebe os traces publicados pelos pods (links-service, users-api,
