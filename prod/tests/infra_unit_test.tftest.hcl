@@ -112,6 +112,30 @@ run "node_group_sizing_matches_spec" {
   }
 }
 
+run "node_group_launch_template_raises_imds_hop_limit" {
+  command = plan
+
+  # Pods run one network hop further from 169.254.169.254 than the node
+  # itself. Without a hop limit of at least 2, the AWS SDK inside a pod
+  # fails with "no EC2 IMDS role found" trying to inherit the node's IAM
+  # role (LabRole) — there's no IRSA available in this Academy account to
+  # fall back on (no iam:CreateRole).
+  assert {
+    condition     = aws_launch_template.users_node.metadata_options[0].http_put_response_hop_limit == 2
+    error_message = "Expected the users node launch template to set http_put_response_hop_limit = 2 so pods can reach the EC2 metadata service"
+  }
+
+  assert {
+    condition     = aws_launch_template.users_node.metadata_options[0].http_tokens == "required"
+    error_message = "Expected IMDSv2 to be required (http_tokens = required), not just optional"
+  }
+
+  assert {
+    condition     = length(aws_eks_node_group.users.launch_template) == 1
+    error_message = "Expected the users node group to reference the custom launch template instead of using EKS's auto-generated default"
+  }
+}
+
 run "ecr_repository_named_per_environment_convention" {
   command = plan
 
