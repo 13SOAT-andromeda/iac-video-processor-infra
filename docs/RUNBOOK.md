@@ -206,6 +206,82 @@ curl -s -X GET "$API/users/SEU_USER_ID" -H "Authorization: Bearer SEU_JWT"
 
 ---
 
+## 11. Destroy — derrubar tudo
+
+**Ordem importa:** o ALB criado pelo Load Balancer Controller (via `Ingress`) **não é gerenciado pelo Terraform** — precisa ser apagado manualmente primeiro, senão o `terraform destroy` da `infra` trava tentando apagar a VPC/subnets com ENIs do ALB ainda anexadas. Depois disso, destrua os stacks **na ordem inversa do deploy**: quem consome (via `data` source) sai antes de quem é consumido.
+
+### 11.1 Apagar o Ingress (derruba o ALB) e o controller
+
+```bash
+kubectl delete -f ~/workspaces/video-processor-hackathon/iac-video-processor-infra/k8s/ingress.yaml
+
+# aguardar o ALB sumir de verdade antes de seguir
+for i in $(seq 1 20); do
+  COUNT=$(aws elbv2 describe-load-balancers --query "length(LoadBalancers[?contains(LoadBalancerName, 'k8s-default-videopro')])" --output text)
+  [ "$COUNT" = "0" ] && break
+  sleep 10
+done
+
+helm uninstall aws-load-balancer-controller -n kube-system
+kubectl delete secret aws-alb-credentials -n kube-system
+```
+
+### 11.2 `iac-video-processor-gateway`
+
+```bash
+cd ~/workspaces/video-processor-hackathon/iac-video-processor-gateway/prod
+terraform destroy -input=false -auto-approve -refresh=false
+```
+`-refresh=false` é necessário: o `data "aws_lb" "eks_alb"` não encontra mais nada (o ALB já foi apagado no passo 11.1), e sem `-refresh=false` o Terraform tenta reler esse data source antes do plano de destroy e quebra. Como o destroy só precisa do que já está no state, não precisa reler nada.
+
+### 11.3 `video-processor-authorizer` e `video-processor-authentication-api` (Lambdas)
+
+```bash
+cd ~/workspaces/video-processor-hackathon/video-processor-authorizer/terraform/prod
+terraform destroy -input=false -auto-approve -var="image_tag=latest"
+
+cd ~/workspaces/video-processor-hackathon/video-processor-authentication-api/terraform/prod
+terraform destroy -input=false -auto-approve -refresh=false -var="image_tag=latest"
+```
+`authentication-api` também precisa de `-refresh=false` — o `data "aws_apigatewayv2_apis" "gateway"` não acha mais nada porque o gateway já foi destruído no passo 11.2. `image_tag` é variável obrigatória sem default; o valor em si não importa pro destroy, só precisa estar presente.
+
+### 11.4 `iac-video-processor-data` (RDS + DynamoDB — **dados perdidos de vez**)
+
+```bash
+cd ~/workspaces/video-processor-hackathon/iac-video-processor-data/prod
+terraform destroy -input=false -auto-approve
+```
+
+### 11.5 `iac-video-processor-infra` (VPC, EKS, ECR, secrets, SNS/SQS)
+
+```bash
+cd ~/workspaces/video-processor-hackathon/iac-video-processor-infra/prod
+terraform destroy -input=false -auto-approve
+```
+Demora ~10min (node group + cluster EKS). **Os repositórios ECR que receberam push de imagem vão falhar** (`RepositoryNotEmptyException`) porque o módulo não tem `force_delete`. Esvaziar antes de tentar de novo:
+
+```bash
+for repo in video-processor-users-api-prod video-processor-authorizer-prod video-processor-authentication-prod; do
+  IMAGE_IDS=$(aws ecr list-images --repository-name "$repo" --query "imageIds[*]" --output json)
+  [ "$(echo "$IMAGE_IDS" | jq 'length')" -gt 0 ] && aws ecr batch-delete-image --repository-name "$repo" --image-ids "$IMAGE_IDS"
+done
+```
+Rodar duas vezes se sobrar imagem "presa" atrás de um manifest list (`ImageReferencedByManifestList`) — a segunda passada limpa o que ficou órfão depois que a tag principal já foi removida. Depois, rodar `terraform destroy` de novo — só os 3 `aws_ecr_repository` restantes, o resto já foi destruído na primeira tentativa.
+
+### 11.6 Confirmar que ficou tudo limpo
+
+```bash
+aws eks list-clusters --output json
+aws ecr describe-repositories --query "repositories[].repositoryName" --output json
+aws rds describe-db-instances --query "DBInstances[].DBInstanceIdentifier" --output json
+aws dynamodb list-tables --output json
+aws apigatewayv2 get-apis --query "Items[].Name" --output json
+aws ec2 describe-vpcs --query "Vpcs[?IsDefault==\`false\`]" --output json
+```
+Tudo deve vir vazio (`[]`). Funções Lambda que sobrarem (`RedshiftEventSubscription`, `ModLabRole`, etc.) são da própria infra do AWS Academy Lab — não é nada nosso, ignorar.
+
+---
+
 ## Troubleshooting
 
 **Docker Desktop trava/cai no meio de um build (WSL2):** sintoma é `/usr/bin/docker: Input/output error` ou `command not found`. Verificar com `wsl.exe -l -v` — se `docker-desktop` aparecer `Stopped`, reabrir o Docker Desktop no Windows (fechar de vez pela bandeja antes de reabrir, não só clicar no ícone) e esperar aparecer `Running` antes de tentar de novo.
