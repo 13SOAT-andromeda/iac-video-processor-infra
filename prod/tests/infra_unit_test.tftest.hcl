@@ -103,30 +103,6 @@ run "ecr_repository_named_per_environment_convention" {
     condition     = module.ecr_users_api.repository_name == "video-processor-users-api-prod"
     error_message = "Expected ECR repository name to follow the video-processor-users-api-${var.environment} convention"
   }
-
-  assert {
-    condition     = module.ecr_link_api.repository_name == "video-processor-link-api-prod"
-    error_message = "Expected ECR repository name to follow the video-processor-link-api-${var.environment} convention"
-  }
-}
-
-run "video_processing_status_queue_has_no_dlq_per_adr003" {
-  command = plan
-
-  assert {
-    condition     = aws_sqs_queue.video_processing_status.name == "video-processing-status-queue-prod"
-    error_message = "Expected the status queue to keep the architecture-spec contract name video-processing-status-queue + environment suffix"
-  }
-
-  # Note: the queue deliberately has NO redrive_policy/DLQ (ADR-003 v5
-  # addendum — links-service owns the state and handles consume errors
-  # internally). redrive_policy is Optional+Computed, so its absence cannot
-  # be asserted at plan time without an override that would defeat the check.
-
-  assert {
-    condition     = aws_sqs_queue.video_processing_status.visibility_timeout_seconds == 60
-    error_message = "Expected a 60s visibility timeout — links-service applies a fast idempotent DynamoDB transition per message"
-  }
 }
 
 run "notification_events_pair_named_and_wired_per_spec" {
@@ -358,5 +334,32 @@ run "worker_ecr_and_artifacts_bucket_named_per_convention" {
   assert {
     condition     = aws_s3_bucket.artifacts.bucket == "video-processor-artifacts-prod"
     error_message = "Expected the deploy-artifacts bucket to follow the video-processor-artifacts-${var.environment} convention (the converter's CD uploads dlq-handler zips here)"
+  }
+}
+
+run "jwt_signing_key_secret_named_and_wired_per_spec" {
+  command = plan
+
+  override_resource {
+    target = random_password.jwt_signing_key
+    values = {
+      result = "mock-generated-password-value"
+    }
+    override_during = plan
+  }
+
+  assert {
+    condition     = aws_secretsmanager_secret.jwt_signing_key.name == "jwt-signing-key-prod"
+    error_message = "Expected the JWT signing key secret name to follow the jwt-signing-key-${var.environment} convention"
+  }
+
+  assert {
+    condition     = random_password.jwt_signing_key.length == 64
+    error_message = "Expected the generated JWT signing key to be 64 characters long"
+  }
+
+  assert {
+    condition     = aws_secretsmanager_secret_version.jwt_signing_key.secret_string == "mock-generated-password-value"
+    error_message = "Expected the secret version to store the random_password-generated value, not a hardcoded string"
   }
 }

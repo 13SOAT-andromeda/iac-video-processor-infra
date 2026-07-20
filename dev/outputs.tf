@@ -28,19 +28,14 @@ output "user_events_queue_arn" {
   value       = aws_sqs_queue.user_events.arn
 }
 
-output "link_api_ecr_repository_url" {
-  description = "The ECR repository URL for video-processor-link-api"
-  value       = module.ecr_link_api.repository_url
+output "jwt_signing_key_secret_arn" {
+  description = "ARN of the jwt-signing-key secret (shared between authentication-api, authorizer, and users-api)"
+  value       = aws_secretsmanager_secret.jwt_signing_key.arn
 }
 
-output "video_processing_status_queue_url" {
-  description = "URL of the video-processing-status SQS queue (published by converter/DLQ handler, consumed by links-service)"
-  value       = aws_sqs_queue.video_processing_status.id
-}
-
-output "video_processing_status_queue_arn" {
-  description = "ARN of the video-processing-status SQS queue"
-  value       = aws_sqs_queue.video_processing_status.arn
+output "jwt_signing_key_secret_name" {
+  description = "Name of the jwt-signing-key secret, for cross-repo lookup via data.aws_secretsmanager_secret"
+  value       = aws_secretsmanager_secret.jwt_signing_key.name
 }
 
 output "video_processor_bucket_name" {
