@@ -24,6 +24,22 @@ mock_provider "aws" {
       reverse_dns_prefix = "com.amazonaws"
     }
   }
+
+  mock_data "aws_eks_cluster_auth" {
+    defaults = {
+      token = "mock-token"
+    }
+  }
+}
+
+# datadog.tf declares the kubernetes/helm providers at root module level, so
+# every run block in this file (which plans the whole prod/ module) needs
+# them mocked too — otherwise Terraform tries to configure real providers.
+mock_provider "kubernetes" {}
+mock_provider "helm" {}
+
+variables {
+  datadog_api_key = "mock-api-key"
 }
 
 run "vpc_has_two_azs_and_correct_cidr" {
@@ -93,6 +109,30 @@ run "node_group_sizing_matches_spec" {
       local.node_group_config.users.desired_size == 1
     )
     error_message = "Expected the users node group to be sized min=1/max=2/desired=1"
+  }
+}
+
+run "node_group_launch_template_raises_imds_hop_limit" {
+  command = plan
+
+  # Pods run one network hop further from 169.254.169.254 than the node
+  # itself. Without a hop limit of at least 2, the AWS SDK inside a pod
+  # fails with "no EC2 IMDS role found" trying to inherit the node's IAM
+  # role (LabRole) — there's no IRSA available in this Academy account to
+  # fall back on (no iam:CreateRole).
+  assert {
+    condition     = aws_launch_template.users_node.metadata_options[0].http_put_response_hop_limit == 2
+    error_message = "Expected the users node launch template to set http_put_response_hop_limit = 2 so pods can reach the EC2 metadata service"
+  }
+
+  assert {
+    condition     = aws_launch_template.users_node.metadata_options[0].http_tokens == "required"
+    error_message = "Expected IMDSv2 to be required (http_tokens = required), not just optional"
+  }
+
+  assert {
+    condition     = length(aws_eks_node_group.users.launch_template) == 1
+    error_message = "Expected the users node group to reference the custom launch template instead of using EKS's auto-generated default"
   }
 }
 
