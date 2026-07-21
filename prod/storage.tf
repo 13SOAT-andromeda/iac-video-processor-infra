@@ -1,9 +1,17 @@
+# account_id no sufixo dos nomes de bucket: nome de bucket S3 é global (não só
+# por conta), e a conta do AWS Academy Lab reseta a cada sessão — sem esse
+# sufixo, "video-processor-bucket-prod" colide com o mesmo nome já reivindicado
+# por outra conta (confirmado: CreateBucket -> BucketAlreadyExists, HeadBucket
+# -> 403 de conta alheia). Mesmo problema que o bucket de state do Terraform já
+# resolve com o sufixo ${ACCOUNT_ID} (ver RUNBOOK.md passo 1).
+data "aws_caller_identity" "current" {}
+
 # Bucket de vídeos (contrato do video-processor-converter): uploads .mp4 disparam
 # a fila principal; o worker grava o .zip de frames em processed/. O filtro por
 # sufixo .mp4 evita que o .zip gerado re-dispare o worker (que também se protege
 # via ErrNotRawKey).
 resource "aws_s3_bucket" "video_processor" {
-  bucket = "video-processor-bucket-${var.environment}"
+  bucket = "video-processor-bucket-${var.environment}-${data.aws_caller_identity.current.account_id}"
 
   tags = {
     Project     = "video-processor"
@@ -27,7 +35,7 @@ resource "aws_s3_bucket_notification" "video_processor" {
 # o zip do dlq-handler (dlq-handler/<sha>.zip e latest.zip), consumido pelo
 # Terraform de Lambdas daquele repo.
 resource "aws_s3_bucket" "artifacts" {
-  bucket = "video-processor-artifacts-${var.environment}"
+  bucket = "video-processor-artifacts-${var.environment}-${data.aws_caller_identity.current.account_id}"
 
   tags = {
     Project     = "video-processor"

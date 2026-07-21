@@ -1,9 +1,15 @@
+# account_id no sufixo: mesmo padrão do prod/ (ver storage.tf de lá) — aqui
+# não há colisão real (LocalStack), mas mantém a fórmula do nome idêntica
+# entre ambientes, já que o video-processor-converter e o link-api computam
+# esse nome de forma independente (data source, não remote state).
+data "aws_caller_identity" "current" {}
+
 # Bucket de vídeos (contrato do video-processor-converter): uploads .mp4 disparam
 # a fila principal; o worker grava o .zip de frames em processed/. O filtro por
 # sufixo .mp4 evita que o .zip gerado re-dispare o worker (que também se protege
 # via ErrNotRawKey).
 resource "aws_s3_bucket" "video_processor" {
-  bucket = "video-processor-bucket-${var.environment}"
+  bucket = "video-processor-bucket-${var.environment}-${data.aws_caller_identity.current.account_id}"
 
   tags = {
     Project     = "video-processor"
@@ -27,7 +33,7 @@ resource "aws_s3_bucket_notification" "video_processor" {
 # o zip do dlq-handler (dlq-handler/<sha>.zip e latest.zip), consumido pelo
 # Terraform de Lambdas daquele repo.
 resource "aws_s3_bucket" "artifacts" {
-  bucket = "video-processor-artifacts-${var.environment}"
+  bucket = "video-processor-artifacts-${var.environment}-${data.aws_caller_identity.current.account_id}"
 
   tags = {
     Project     = "video-processor"

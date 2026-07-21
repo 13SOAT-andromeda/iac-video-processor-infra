@@ -342,8 +342,8 @@ run "video_processing_pipeline_wired_per_converter_contract" {
   }
 
   assert {
-    condition     = aws_s3_bucket.video_processor.bucket == "video-processor-bucket-prod"
-    error_message = "Expected the video bucket to follow the video-processor-bucket-${var.environment} convention"
+    condition     = startswith(aws_s3_bucket.video_processor.bucket, "video-processor-bucket-prod-")
+    error_message = "Expected the video bucket to follow the video-processor-bucket-$${var.environment}-$${account_id} convention (account_id suffix avoids the global S3 namespace collision hit across AWS Academy Lab accounts)"
   }
 
   assert {
@@ -396,8 +396,8 @@ run "worker_ecr_and_artifacts_bucket_named_per_convention" {
   }
 
   assert {
-    condition     = aws_s3_bucket.artifacts.bucket == "video-processor-artifacts-prod"
-    error_message = "Expected the deploy-artifacts bucket to follow the video-processor-artifacts-${var.environment} convention (the converter's CD uploads dlq-handler zips here)"
+    condition     = startswith(aws_s3_bucket.artifacts.bucket, "video-processor-artifacts-prod-")
+    error_message = "Expected the deploy-artifacts bucket to follow the video-processor-artifacts-$${var.environment}-$${account_id} convention (the converter's CD uploads dlq-handler zips here)"
   }
 }
 
