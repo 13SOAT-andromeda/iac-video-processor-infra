@@ -18,6 +18,26 @@ output "users_api_ecr_repository_url" {
   value       = module.ecr_users_api.repository_url
 }
 
+output "link_api_ecr_repository_url" {
+  description = "The ECR repository URL for video-processor-link-api"
+  value       = module.ecr_link_api.repository_url
+}
+
+output "video_processing_status_queue_url" {
+  description = "URL of the video-processing-status SQS queue (published by converter/DLQ handler, consumed by links-service)"
+  value       = aws_sqs_queue.video_processing_status.id
+}
+
+output "video_processing_status_queue_arn" {
+  description = "ARN of the video-processing-status SQS queue"
+  value       = aws_sqs_queue.video_processing_status.arn
+}
+
+output "datadog_agent_helm_release_status" {
+  description = "Status of the Datadog Agent Helm release (deployed, failed, etc.)"
+  value       = helm_release.datadog.status
+}
+
 output "notification_events_topic_arn" {
   description = "ARN of the notification-events SNS topic (consumed by video-processor-authentication-api)"
   value       = aws_sns_topic.notification_events.arn
