@@ -9,3 +9,21 @@ variable "region" {
   type        = string
   default     = "us-east-1"
 }
+
+variable "datadog_api_key" {
+  description = "Datadog API key. Used by the Cluster Agent (k8s secret) and the Lambda log forwarder."
+  type        = string
+  sensitive   = true
+}
+
+variable "datadog_site" {
+  description = "Datadog site to send data to (e.g. datadoghq.com, datadoghq.eu, us5.datadoghq.com)"
+  type        = string
+  default     = "datadoghq.com"
+}
+
+variable "enable_downstream_log_forwarding" {
+  description = "Whether to wire up CloudWatch Log subscription filters (Lambda + API Gateway access logs) to the Datadog forwarder. Requires video-processor-authorizer, video-processor-authentication-api and iac-video-processor-gateway to already be applied (their log groups must exist). Leave false on first apply of this repo, flip to true afterward."
+  type        = bool
+  default     = false
+}

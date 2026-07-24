@@ -50,6 +50,13 @@ resource "aws_eks_node_group" "users" {
     desired_size = local.node_group_config.users.desired_size
   }
 
+  # See prod/launch_template.tf — sets the IMDSv2 hop limit to 2 so pods
+  # (e.g. the Datadog Agent) can reach IMDS and assume LabRole.
+  launch_template {
+    id      = aws_launch_template.users.id
+    version = aws_launch_template.users.latest_version
+  }
+
   tags = {
     Project     = "video-processor"
     Environment = var.environment

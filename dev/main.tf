@@ -68,3 +68,11 @@ locals {
 
   cluster_name = "video-processor-eks-${var.environment}"
 }
+
+# Datadog observability (see prod/datadog.tf, prod/datadog-log-forwarder.tf)
+# is intentionally NOT replicated in this
+# environment: dev runs against LocalStack Community, whose EKS emulation
+# doesn't run real Kubernetes control/data planes, so a Helm-deployed
+# Datadog Agent DaemonSet has nothing real to schedule onto or connect to.
+# Skipping it here keeps `terraform validate`/`plan` meaningful for dev
+# instead of modeling infrastructure that can't actually run.
