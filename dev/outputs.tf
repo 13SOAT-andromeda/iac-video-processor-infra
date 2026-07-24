@@ -72,3 +72,18 @@ output "artifacts_bucket_name" {
   description = "Name of the deploy-artifacts S3 bucket (dlq-handler zips published by the converter CD)"
   value       = aws_s3_bucket.artifacts.bucket
 }
+
+output "video_upload_confirmation_queue_url" {
+  description = "URL of the video-upload-confirmation SQS queue (fed by S3 ObjectCreated via SNS fan-out, consumed by links-service to auto-confirm uploads)"
+  value       = aws_sqs_queue.video_upload_confirmation.id
+}
+
+output "video_upload_confirmation_queue_arn" {
+  description = "ARN of the video-upload-confirmation SQS queue"
+  value       = aws_sqs_queue.video_upload_confirmation.arn
+}
+
+output "video_upload_events_topic_arn" {
+  description = "ARN of the video-upload-events SNS topic (S3 ObjectCreated fan-out to video_processing and video_upload_confirmation)"
+  value       = aws_sns_topic.video_upload_events.arn
+}

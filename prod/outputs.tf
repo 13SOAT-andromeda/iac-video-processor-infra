@@ -18,6 +18,26 @@ output "users_api_ecr_repository_url" {
   value       = module.ecr_users_api.repository_url
 }
 
+output "link_api_ecr_repository_url" {
+  description = "The ECR repository URL for video-processor-link-api"
+  value       = module.ecr_link_api.repository_url
+}
+
+output "video_processing_status_queue_url" {
+  description = "URL of the video-processing-status SQS queue (published by converter/DLQ handler, consumed by links-service)"
+  value       = aws_sqs_queue.video_processing_status.id
+}
+
+output "video_processing_status_queue_arn" {
+  description = "ARN of the video-processing-status SQS queue"
+  value       = aws_sqs_queue.video_processing_status.arn
+}
+
+output "datadog_agent_helm_release_status" {
+  description = "Status of the Datadog Agent Helm release (deployed, failed, etc.)"
+  value       = helm_release.datadog.status
+}
+
 output "notification_events_topic_arn" {
   description = "ARN of the notification-events SNS topic (consumed by video-processor-authentication-api)"
   value       = aws_sns_topic.notification_events.arn
@@ -76,4 +96,19 @@ output "worker_ecr_repository_url" {
 output "artifacts_bucket_name" {
   description = "Name of the deploy-artifacts S3 bucket (dlq-handler zips published by the converter CD)"
   value       = aws_s3_bucket.artifacts.bucket
+}
+
+output "video_upload_confirmation_queue_url" {
+  description = "URL of the video-upload-confirmation SQS queue (fed by S3 ObjectCreated via SNS fan-out, consumed by links-service to auto-confirm uploads)"
+  value       = aws_sqs_queue.video_upload_confirmation.id
+}
+
+output "video_upload_confirmation_queue_arn" {
+  description = "ARN of the video-upload-confirmation SQS queue"
+  value       = aws_sqs_queue.video_upload_confirmation.arn
+}
+
+output "video_upload_events_topic_arn" {
+  description = "ARN of the video-upload-events SNS topic (S3 ObjectCreated fan-out to video_processing and video_upload_confirmation)"
+  value       = aws_sns_topic.video_upload_events.arn
 }

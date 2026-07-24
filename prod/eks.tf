@@ -44,6 +44,13 @@ resource "aws_eks_node_group" "users" {
   instance_types = local.node_group_config.users.instance_types
   ami_type       = local.node_group_config.users.ami_type
 
+  # See prod/launch_template.tf — sets the IMDSv2 hop limit to 2 so pods
+  # (e.g. the Datadog Agent) can reach IMDS and assume LabRole.
+  launch_template {
+    id      = aws_launch_template.users.id
+    version = aws_launch_template.users.latest_version
+  }
+
   scaling_config {
     min_size     = local.node_group_config.users.min_size
     max_size     = local.node_group_config.users.max_size

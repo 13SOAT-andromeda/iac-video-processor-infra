@@ -24,6 +24,22 @@ mock_provider "aws" {
       reverse_dns_prefix = "com.amazonaws"
     }
   }
+
+  mock_data "aws_eks_cluster_auth" {
+    defaults = {
+      token = "mock-token"
+    }
+  }
+}
+
+# datadog.tf declares the kubernetes/helm providers at root module level, so
+# every run block in this file (which plans the whole prod/ module) needs
+# them mocked too — otherwise Terraform tries to configure real providers.
+mock_provider "kubernetes" {}
+mock_provider "helm" {}
+
+variables {
+  datadog_api_key = "mock-api-key"
 }
 
 run "vpc_has_two_azs_and_correct_cidr" {
@@ -96,12 +112,60 @@ run "node_group_sizing_matches_spec" {
   }
 }
 
+run "node_group_launch_template_raises_imds_hop_limit" {
+  command = plan
+
+  # Pods run one network hop further from 169.254.169.254 than the node
+  # itself. Without a hop limit of at least 2, the AWS SDK inside a pod
+  # fails with "no EC2 IMDS role found" trying to inherit the node's IAM
+  # role (LabRole) — there's no IRSA available in this Academy account to
+  # fall back on (no iam:CreateRole).
+  assert {
+    condition     = aws_launch_template.users.metadata_options[0].http_put_response_hop_limit == 2
+    error_message = "Expected the users node launch template to set http_put_response_hop_limit = 2 so pods can reach the EC2 metadata service"
+  }
+
+  assert {
+    condition     = aws_launch_template.users.metadata_options[0].http_tokens == "required"
+    error_message = "Expected IMDSv2 to be required (http_tokens = required), not just optional"
+  }
+
+  assert {
+    condition     = length(aws_eks_node_group.users.launch_template) == 1
+    error_message = "Expected the users node group to reference the custom launch template instead of using EKS's auto-generated default"
+  }
+}
+
 run "ecr_repository_named_per_environment_convention" {
   command = plan
 
   assert {
     condition     = module.ecr_users_api.repository_name == "video-processor-users-api-prod"
     error_message = "Expected ECR repository name to follow the video-processor-users-api-${var.environment} convention"
+  }
+
+  assert {
+    condition     = module.ecr_link_api.repository_name == "video-processor-link-api-prod"
+    error_message = "Expected ECR repository name to follow the video-processor-link-api-${var.environment} convention"
+  }
+}
+
+run "video_processing_status_queue_has_no_dlq_per_adr003" {
+  command = plan
+
+  assert {
+    condition     = aws_sqs_queue.video_processing_status.name == "video-processing-status-queue-prod"
+    error_message = "Expected the status queue to keep the architecture-spec contract name video-processing-status-queue + environment suffix"
+  }
+
+  # Note: the queue deliberately has NO redrive_policy/DLQ (ADR-003 v5
+  # addendum — links-service owns the state and handles consume errors
+  # internally). redrive_policy is Optional+Computed, so its absence cannot
+  # be asserted at plan time without an override that would defeat the check.
+
+  assert {
+    condition     = aws_sqs_queue.video_processing_status.visibility_timeout_seconds == 60
+    error_message = "Expected a 60s visibility timeout — links-service applies a fast idempotent DynamoDB transition per message"
   }
 }
 
@@ -277,6 +341,14 @@ run "video_processing_pipeline_wired_per_converter_contract" {
     override_during = plan
   }
 
+  override_resource {
+    target = aws_sns_topic.video_upload_events
+    values = {
+      arn = "arn:aws:sns:us-east-1:123456789012:video-upload-events-topic-prod"
+    }
+    override_during = plan
+  }
+
   assert {
     condition     = aws_s3_bucket.video_processor.bucket == "video-processor-bucket-prod"
     error_message = "Expected the video bucket to follow the video-processor-bucket-${var.environment} convention"
@@ -308,18 +380,92 @@ run "video_processing_pipeline_wired_per_converter_contract" {
   }
 
   assert {
-    condition     = jsondecode(aws_sqs_queue_policy.video_processing.policy).Statement[0].Condition.ArnEquals["aws:SourceArn"] == aws_s3_bucket.video_processor.arn
-    error_message = "Expected the main queue policy to scope S3 SendMessage to the video bucket's arn via aws:SourceArn"
+    condition     = jsondecode(aws_sqs_queue_policy.video_processing.policy).Statement[0].Condition.ArnEquals["aws:SourceArn"] == aws_sns_topic.video_upload_events.arn
+    error_message = "Expected the main queue policy to scope SendMessage to the video_upload_events topic's arn via aws:SourceArn (S3 notifies the topic, not the queue directly)"
   }
 
   assert {
-    condition     = aws_s3_bucket_notification.video_processor.queue[0].queue_arn == aws_sqs_queue.video_processing.arn
-    error_message = "Expected the S3 notification to target the main video-processing queue"
+    condition     = aws_s3_bucket_notification.video_processor.topic[0].topic_arn == aws_sns_topic.video_upload_events.arn
+    error_message = "Expected the S3 notification to target the video_upload_events SNS topic, not a queue directly (two queues can't share the same suffix filter unambiguously)"
   }
 
   assert {
-    condition     = aws_s3_bucket_notification.video_processor.queue[0].filter_suffix == ".mp4"
+    condition     = aws_s3_bucket_notification.video_processor.topic[0].filter_suffix == ".mp4"
     error_message = "Expected the S3 notification to filter on .mp4 so the processed/ zip does not re-trigger the worker"
+  }
+}
+
+run "video_upload_confirmation_fans_out_from_same_s3_event" {
+  command = plan
+
+  # Same plan-time unknown-arn issue as the notification_events run block
+  # above — see the comment there for why these overrides are needed.
+  override_resource {
+    target = aws_sns_topic.video_upload_events
+    values = {
+      arn = "arn:aws:sns:us-east-1:123456789012:video-upload-events-topic-prod"
+    }
+    override_during = plan
+  }
+
+  override_resource {
+    target = aws_sqs_queue.video_processing
+    values = {
+      arn = "arn:aws:sqs:us-east-1:123456789012:video-processing-queue-prod"
+    }
+    override_during = plan
+  }
+
+  override_resource {
+    target = aws_sqs_queue.video_upload_confirmation
+    values = {
+      arn = "arn:aws:sqs:us-east-1:123456789012:video-upload-confirmation-queue-prod"
+    }
+    override_during = plan
+  }
+
+  override_resource {
+    target = aws_s3_bucket.video_processor
+    values = {
+      arn = "arn:aws:s3:::video-processor-bucket-prod"
+    }
+    override_during = plan
+  }
+
+  assert {
+    condition     = aws_sqs_queue.video_upload_confirmation.name == "video-upload-confirmation-queue-prod"
+    error_message = "Expected the upload-confirmation queue to follow the video-upload-confirmation-queue-${var.environment} convention"
+  }
+
+  assert {
+    condition     = aws_sqs_queue.video_upload_confirmation.visibility_timeout_seconds == 60
+    error_message = "Expected a 60s visibility timeout — links-service applies a fast idempotent DynamoDB transition per message, same as video_processing_status"
+  }
+
+  assert {
+    condition     = jsondecode(aws_sqs_queue_policy.video_upload_confirmation.policy).Statement[0].Condition.ArnEquals["aws:SourceArn"] == aws_sns_topic.video_upload_events.arn
+    error_message = "Expected the upload-confirmation queue policy to scope SendMessage to the video_upload_events topic's arn via aws:SourceArn"
+  }
+
+  assert {
+    condition     = jsondecode(aws_sns_topic_policy.video_upload_events.policy).Statement[0].Condition.ArnEquals["aws:SourceArn"] == aws_s3_bucket.video_processor.arn
+    error_message = "Expected the topic policy to scope sns:Publish to the video bucket's arn via aws:SourceArn, otherwise S3 can't be authorized to publish"
+  }
+
+  assert {
+    condition = length([
+      for s in [aws_sns_topic_subscription.video_upload_events_processing, aws_sns_topic_subscription.video_upload_events_confirmation]
+      : s if s.endpoint == aws_sqs_queue.video_processing.arn
+    ]) == 1
+    error_message = "Expected exactly one of the two SNS subscriptions to fan out to the worker's video_processing queue"
+  }
+
+  assert {
+    condition = length([
+      for s in [aws_sns_topic_subscription.video_upload_events_processing, aws_sns_topic_subscription.video_upload_events_confirmation]
+      : s if s.endpoint == aws_sqs_queue.video_upload_confirmation.arn
+    ]) == 1
+    error_message = "Expected exactly one of the two SNS subscriptions to fan out to the links-service video_upload_confirmation queue"
   }
 }
 

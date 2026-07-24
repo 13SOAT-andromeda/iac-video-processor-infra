@@ -122,11 +122,12 @@ resource "aws_sqs_queue" "video_processing_status" {
 }
 
 # Fila principal de processamento de vídeo (contrato do video-processor-converter):
-# alimentada pela notificação S3 de upload .mp4 (ver storage.tf) e consumida pelo
-# processing-worker. Visibility de 20s (vs 1800s em prod) para retries rápidos na
-# iteração local; após 3 falhas a mensagem vai para a DLQ, consumida pelo
-# dlq-handler. Nomes mantêm o contrato da spec (video-processing-queue /
-# video-processing-dlq) + sufixo de ambiente do repo.
+# alimentada pela notificação S3 de upload .mp4 (ver storage.tf, via SNS
+# fan-out video_upload_events) e consumida pelo processing-worker. Visibility
+# de 20s (vs 1800s em prod) para retries rápidos na iteração local; após 3
+# falhas a mensagem vai para a DLQ, consumida pelo dlq-handler. Nomes mantêm
+# o contrato da spec (video-processing-queue / video-processing-dlq) +
+# sufixo de ambiente do repo.
 resource "aws_sqs_queue" "video_processing_dlq" {
   name = "video-processing-dlq-${var.environment}"
 
@@ -157,10 +158,75 @@ resource "aws_sqs_queue_policy" "video_processing" {
     Version = "2012-10-17"
     Statement = [{
       Effect    = "Allow"
-      Principal = { Service = "s3.amazonaws.com" }
+      Principal = { Service = "sns.amazonaws.com" }
       Action    = "sqs:SendMessage"
       Resource  = aws_sqs_queue.video_processing.arn
+      Condition = { ArnEquals = { "aws:SourceArn" = aws_sns_topic.video_upload_events.arn } }
+    }]
+  })
+}
+
+# Fila de confirmação de upload (etapa links) — ver comentário na versão
+# prod deste arquivo. Sem DLQ própria (ADR-003, adendo v5).
+resource "aws_sqs_queue" "video_upload_confirmation" {
+  name                       = "video-upload-confirmation-queue-${var.environment}"
+  visibility_timeout_seconds = 20
+
+  tags = {
+    Project     = "video-processor"
+    Environment = var.environment
+  }
+}
+
+resource "aws_sqs_queue_policy" "video_upload_confirmation" {
+  queue_url = aws_sqs_queue.video_upload_confirmation.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "sns.amazonaws.com" }
+      Action    = "sqs:SendMessage"
+      Resource  = aws_sqs_queue.video_upload_confirmation.arn
+      Condition = { ArnEquals = { "aws:SourceArn" = aws_sns_topic.video_upload_events.arn } }
+    }]
+  })
+}
+
+# Tópico de fan-out do evento de upload bruto — ver comentário na versão
+# prod deste arquivo.
+resource "aws_sns_topic" "video_upload_events" {
+  name = "video-upload-events-topic-${var.environment}"
+
+  tags = {
+    Project     = "video-processor"
+    Environment = var.environment
+  }
+}
+
+# S3 precisa de permissão explícita de Publish no tópico — ver comentário na
+# versão prod deste arquivo.
+resource "aws_sns_topic_policy" "video_upload_events" {
+  arn = aws_sns_topic.video_upload_events.arn
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "s3.amazonaws.com" }
+      Action    = "sns:Publish"
+      Resource  = aws_sns_topic.video_upload_events.arn
       Condition = { ArnEquals = { "aws:SourceArn" = aws_s3_bucket.video_processor.arn } }
     }]
   })
+}
+
+resource "aws_sns_topic_subscription" "video_upload_events_processing" {
+  topic_arn = aws_sns_topic.video_upload_events.arn
+  protocol  = "sqs"
+  endpoint  = aws_sqs_queue.video_processing.arn
+}
+
+resource "aws_sns_topic_subscription" "video_upload_events_confirmation" {
+  topic_arn = aws_sns_topic.video_upload_events.arn
+  protocol  = "sqs"
+  endpoint  = aws_sqs_queue.video_upload_confirmation.arn
 }

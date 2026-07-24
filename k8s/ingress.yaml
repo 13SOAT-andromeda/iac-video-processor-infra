@@ -20,3 +20,13 @@ spec:
                 name: video-processor-users-api-svc
                 port:
                   number: 80
+          # /api/links: o link-api já registra as próprias rotas Gin sob
+          # /api/links/... (mesma convenção do /api/users), então o Ingress
+          # bate certo com o que o pod entende.
+          - path: /api/links
+            pathType: Prefix
+            backend:
+              service:
+                name: video-processor-link-api-svc
+                port:
+                  number: 80
