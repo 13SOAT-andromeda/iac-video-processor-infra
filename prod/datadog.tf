@@ -85,8 +85,28 @@ resource "helm_release" "datadog" {
         }
       }
 
+      # Postgres check for DBM (see datadog-dbm.tf) runs as a cluster check
+      # — dispatched once by the Cluster Agent instead of duplicated on
+      # every node agent — since the target (RDS) isn't a local pod.
       clusterAgent = {
         enabled = true
+
+        confd = var.enable_postgres_dbm ? {
+          "postgres.yaml" = yamlencode({
+            cluster_check = true
+            init_config   = {}
+            instances = [
+              {
+                host     = var.postgres_dbm_host
+                port     = var.postgres_dbm_port
+                username = "datadog"
+                password = random_password.datadog_db_user[0].result
+                dbname   = var.postgres_dbm_dbname
+                dbm      = true
+              }
+            ]
+          })
+        } : {}
       }
     })
   ]

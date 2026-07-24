@@ -27,3 +27,27 @@ variable "enable_downstream_log_forwarding" {
   type        = bool
   default     = false
 }
+
+variable "enable_postgres_dbm" {
+  description = "Whether to configure the Cluster Agent's Postgres check against the users-db RDS instance (Datadog Database Monitoring). Requires iac-video-processor-data to already be applied (the RDS endpoint must exist) and prod/dbm_setup.sql already run against it (dedicated datadog DB user + pg_stat_statements). Leave false on first apply of this repo, flip to true afterward and set postgres_dbm_host."
+  type        = bool
+  default     = false
+}
+
+variable "postgres_dbm_host" {
+  description = "RDS endpoint hostname (no port) of the users-db instance, from iac-video-processor-data's rds_endpoint output. Only used when enable_postgres_dbm = true."
+  type        = string
+  default     = ""
+}
+
+variable "postgres_dbm_port" {
+  description = "RDS endpoint port of the users-db instance. Only used when enable_postgres_dbm = true."
+  type        = number
+  default     = 5432
+}
+
+variable "postgres_dbm_dbname" {
+  description = "Database name to monitor. Only used when enable_postgres_dbm = true."
+  type        = string
+  default     = "usersdb"
+}

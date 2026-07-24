@@ -121,3 +121,58 @@ run "datadog_site_defaults_to_us1" {
     error_message = "Expected the default Datadog site to be datadoghq.com (US1) unless overridden"
   }
 }
+
+run "postgres_dbm_check_omitted_by_default" {
+  command = plan
+
+  assert {
+    condition     = yamldecode(helm_release.datadog.values[0]).clusterAgent.confd == {}
+    error_message = "Expected no Postgres check config when enable_postgres_dbm is false (default) — the RDS endpoint doesn't exist yet on a fresh apply of this repo"
+  }
+}
+
+run "postgres_dbm_check_wired_when_enabled" {
+  command = plan
+
+  variables {
+    enable_postgres_dbm = true
+    postgres_dbm_host   = "video-processor-users-db-prod.example.us-east-1.rds.amazonaws.com"
+  }
+
+  # random_password's result is Optional+Computed, so it's "known after
+  # apply" for a resource not yet in state — command = plan alone can't
+  # resolve helm_release.datadog's values, which reference it. Same
+  # override_during = plan technique already used elsewhere in this repo's
+  # tests (see infra_unit_test.tftest.hcl).
+  override_resource {
+    target = random_password.datadog_db_user[0]
+    values = {
+      result = "mock-postgres-dbm-password"
+    }
+    override_during = plan
+  }
+
+  assert {
+    condition = (
+      yamldecode(yamldecode(helm_release.datadog.values[0]).clusterAgent.confd["postgres.yaml"]).instances[0].host
+      == "video-processor-users-db-prod.example.us-east-1.rds.amazonaws.com"
+    )
+    error_message = "Expected the Postgres check's instance host to be postgres_dbm_host when DBM is enabled"
+  }
+
+  assert {
+    condition = (
+      yamldecode(yamldecode(helm_release.datadog.values[0]).clusterAgent.confd["postgres.yaml"]).instances[0].dbm
+      == true
+    )
+    error_message = "Expected dbm: true — otherwise this is just the basic Postgres integration, not Database Monitoring"
+  }
+
+  assert {
+    condition = (
+      yamldecode(yamldecode(helm_release.datadog.values[0]).clusterAgent.confd["postgres.yaml"]).cluster_check
+      == true
+    )
+    error_message = "Expected cluster_check: true — RDS isn't a local pod, so this should run as a cluster check dispatched once, not duplicated per node agent"
+  }
+}
