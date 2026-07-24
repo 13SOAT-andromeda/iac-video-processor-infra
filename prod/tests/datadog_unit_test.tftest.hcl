@@ -38,12 +38,12 @@ run "datadog_secret_holds_the_api_key" {
   command = plan
 
   assert {
-    condition     = kubernetes_secret.datadog.metadata[0].name == "datadog-secret"
+    condition     = kubernetes_secret_v1.datadog_api_key.metadata[0].name == "datadog-secret"
     error_message = "Expected the Datadog API key secret to be named datadog-secret — the helm_release references it by this exact name"
   }
 
   assert {
-    condition     = kubernetes_secret.datadog.data["api-key"] == "mock-api-key"
+    condition     = kubernetes_secret_v1.datadog_api_key.data["api-key"] == "mock-api-key"
     error_message = "Expected the secret to carry the datadog_api_key variable, not a hardcoded value"
   }
 }
@@ -70,32 +70,46 @@ run "datadog_helm_release_uses_official_chart" {
 run "datadog_agent_enables_apm_and_logs" {
   command = plan
 
+  variables {
+    environment = "prod"
+  }
+
   assert {
-    condition = anytrue([
-      for s in tolist(helm_release.datadog.set) : s.name == "datadog.apm.portEnabled" && s.value == "true"
-    ])
+    condition     = yamldecode(helm_release.datadog.values[0]).datadog.apm.portEnabled == true
     error_message = "Expected APM to be enabled — otherwise links-service/users-api traces would have nowhere to land"
   }
 
   assert {
-    condition = anytrue([
-      for s in tolist(helm_release.datadog.set) : s.name == "datadog.logs.enabled" && s.value == "true"
-    ])
+    condition     = yamldecode(helm_release.datadog.values[0]).datadog.logs.enabled == true
     error_message = "Expected log collection to be enabled"
   }
 
   assert {
-    condition = anytrue([
-      for s in tolist(helm_release.datadog.set) : s.name == "datadog.logs.containerCollectAll" && s.value == "true"
-    ])
+    condition     = yamldecode(helm_release.datadog.values[0]).datadog.logs.containerCollectAll == true
     error_message = "Expected containerCollectAll so logs are collected via autodiscovery without per-pod annotations"
   }
 
   assert {
-    condition = anytrue([
-      for s in tolist(helm_release.datadog.set) : s.name == "clusterAgent.enabled" && s.value == "true"
-    ])
+    condition     = yamldecode(helm_release.datadog.values[0]).clusterAgent.enabled == true
     error_message = "Expected the Cluster Agent to be enabled (reduces load on the EKS control plane vs. each node agent watching the API directly)"
+  }
+}
+
+run "datadog_tags_use_org_governed_keys" {
+  command = plan
+
+  variables {
+    environment = "prod"
+  }
+
+  assert {
+    condition     = contains(yamldecode(helm_release.datadog.values[0]).datadog.tags, "team:video-processor")
+    error_message = "Expected a team:video-processor tag — \"team\" is one of the only two custom tag keys this org's Tag Governance policy allows"
+  }
+
+  assert {
+    condition     = contains(yamldecode(helm_release.datadog.values[0]).datadog.tags, "env:prod")
+    error_message = "Expected an env:<environment> tag — \"env\" is a Datadog standard/unified-service-tagging key, not subject to the custom tag allowlist"
   }
 }
 

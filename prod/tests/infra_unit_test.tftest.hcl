@@ -121,12 +121,12 @@ run "node_group_launch_template_raises_imds_hop_limit" {
   # role (LabRole) — there's no IRSA available in this Academy account to
   # fall back on (no iam:CreateRole).
   assert {
-    condition     = aws_launch_template.users_node.metadata_options[0].http_put_response_hop_limit == 2
+    condition     = aws_launch_template.users.metadata_options[0].http_put_response_hop_limit == 2
     error_message = "Expected the users node launch template to set http_put_response_hop_limit = 2 so pods can reach the EC2 metadata service"
   }
 
   assert {
-    condition     = aws_launch_template.users_node.metadata_options[0].http_tokens == "required"
+    condition     = aws_launch_template.users.metadata_options[0].http_tokens == "required"
     error_message = "Expected IMDSv2 to be required (http_tokens = required), not just optional"
   }
 
