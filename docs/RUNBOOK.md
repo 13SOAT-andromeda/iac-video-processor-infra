@@ -47,6 +47,7 @@ ECR_LINK_API=$(terraform output -raw link_api_ecr_repository_url)
 VIDEO_BUCKET=$(terraform output -raw video_processor_bucket_name)
 ARTIFACTS_BUCKET=$(terraform output -raw artifacts_bucket_name)
 STATUS_QUEUE_URL=$(terraform output -raw video_processing_status_queue_url)
+UPLOAD_CONFIRMATION_QUEUE_URL=$(terraform output -raw video_upload_confirmation_queue_url)
 NOTIFICATION_TOPIC_ARN=$(terraform output -raw notification_events_topic_arn)
 ```
 `VIDEO_BUCKET`/`ARTIFACTS_BUCKET` levam o account ID no nome (`video-processor-bucket-prod-<account_id>`) — mesmo motivo do bucket de state: nome de bucket S3 é global, e sem esse sufixo o `CreateBucket` colide com o nome já usado por outra conta (já aconteceu — outro time do hackathon com a mesma convenção de nome).
@@ -170,6 +171,7 @@ kubectl apply -k k8s/overlays/aws/
 # não hardcoded no manifesto (mesmo padrão do SQS_QUEUE_URL do users-api-worker, passo 5)
 kubectl set env deployment/video-processor-link-api -n default \
   STATUS_QUEUE_URL="$STATUS_QUEUE_URL" \
+  UPLOAD_CONFIRMATION_QUEUE_URL="$UPLOAD_CONFIRMATION_QUEUE_URL" \
   NOTIFICATION_TOPIC_ARN="$NOTIFICATION_TOPIC_ARN" \
   S3_BUCKET="$VIDEO_BUCKET" \
   DYNAMO_LINKS_TABLE="$DYNAMO_LINKS_TABLE" \
@@ -273,24 +275,27 @@ RESP=$(curl -s -X POST "$API/links" -H "Authorization: Bearer $JWT_TOKEN" -H "Co
 LINK_ID=$(echo "$RESP" | python3 -c "import json,sys; print(json.load(sys.stdin)['linkId'])")
 UPLOAD_URL=$(echo "$RESP" | python3 -c "import json,sys; print(json.load(sys.stdin)['uploadUrl'])")
 
-# 2. Upload direto pro S3 (fora do domínio da API — presigned PUT já assinado)
+# 2. Upload direto pro S3 (fora do domínio da API — presigned PUT já assinado).
+#    Não existe callback de confirmação: o próprio S3 dispara o ObjectCreated,
+#    que via fan-out SNS (video-upload-events-topic) alimenta ao mesmo tempo
+#    a video-processing-queue (Lambda worker) e a video-upload-confirmation-queue
+#    (link-api confirma UPLOAD_COMPLETED -> PROCESSING_PENDING sozinho).
 curl -s -X PUT "$UPLOAD_URL" --data-binary "@$FIXDIR/sample_720p.mp4"
 
-# 3. Confirmar upload -> dispara o processamento real (S3 ObjectCreated -> SQS -> Lambda worker)
-curl -s -X PUT "$API/links/$LINK_ID/upload" -H "Authorization: Bearer $JWT_TOKEN"
-
-# 4. Poll do status (sem simulate-worker — processamento 100% real)
+# 3. Poll do status (sem simulate-worker — processamento 100% real; a transição
+#    UPLOAD_COMPLETED -> PROCESSING_PENDING também é automática, pode levar
+#    alguns segundos a mais que antes do processamento aparecer)
 curl -s "$API/links/$LINK_ID" -H "Authorization: Bearer $JWT_TOKEN"
 # esperado: status PROCESSING_COMPLETED (com s3ProcessedKey) em poucos segundos
 
-# 5. Audit trail completo (o "reason" de uma falha só aparece aqui, em metadata)
+# 4. Audit trail completo (o "reason" de uma falha só aparece aqui, em metadata)
 curl -s "$API/links/$LINK_ID/events" -H "Authorization: Bearer $JWT_TOKEN"
 
-# 6. Download do zip processado
+# 5. Download do zip processado
 curl -s "$API/links/$LINK_ID/download" -H "Authorization: Bearer $JWT_TOKEN"
 ```
 
-Repita os passos 1-5 pra `sample_1080p.mp4` (sucesso, no limite exato aceito) e `sample_1440p.mp4` (espera `PROCESSING_FAILED`/`invalid_resolution` em ~10s, sem passar pela DLQ — é rejeição de negócio numa única invocação, não um erro transitório).
+Repita os passos 1-4 pra `sample_1080p.mp4` (sucesso, no limite exato aceito) e `sample_1440p.mp4` (espera `PROCESSING_FAILED`/`invalid_resolution` em ~10s, sem passar pela DLQ — é rejeição de negócio numa única invocação, não um erro transitório).
 
 **Caso da DLQ (`invalid_video.mp4`):** o `video-processing-queue` em prod tem `visibility_timeout_seconds = 1800` e `maxReceiveCount = 3` — o worker falha o `ffprobe` (garbage não é container de vídeo válido), pede retry, e só cai na `video-processing-dlq` depois de **~90min** (3 tentativas × 30min). O `dlq-handler` então publica `PROCESSING_FAILED`/`max_retries_exceeded`. Suba esse arquivo **primeiro**, em paralelo com o resto do teste, pra não bloquear — ou pule esse caso se não tiver 90min disponíveis.
 

@@ -312,6 +312,177 @@ run "user_events_pair_named_and_wired_per_spec" {
   }
 }
 
+run "video_processing_pipeline_wired_per_converter_contract" {
+  command = plan
+
+  # Same plan-time unknown-arn issue as the notification_events run block
+  # above — see the comment there for why these overrides are needed.
+  override_resource {
+    target = aws_sqs_queue.video_processing
+    values = {
+      arn = "arn:aws:sqs:us-east-1:123456789012:video-processing-queue-prod"
+    }
+    override_during = plan
+  }
+
+  override_resource {
+    target = aws_sqs_queue.video_processing_dlq
+    values = {
+      arn = "arn:aws:sqs:us-east-1:123456789012:video-processing-dlq-prod"
+    }
+    override_during = plan
+  }
+
+  override_resource {
+    target = aws_s3_bucket.video_processor
+    values = {
+      arn = "arn:aws:s3:::video-processor-bucket-prod"
+    }
+    override_during = plan
+  }
+
+  override_resource {
+    target = aws_sns_topic.video_upload_events
+    values = {
+      arn = "arn:aws:sns:us-east-1:123456789012:video-upload-events-topic-prod"
+    }
+    override_during = plan
+  }
+
+  assert {
+    condition     = aws_s3_bucket.video_processor.bucket == "video-processor-bucket-prod"
+    error_message = "Expected the video bucket to follow the video-processor-bucket-${var.environment} convention"
+  }
+
+  assert {
+    condition     = aws_sqs_queue.video_processing.name == "video-processing-queue-prod"
+    error_message = "Expected the main queue to keep the converter contract name video-processing-queue + environment suffix"
+  }
+
+  assert {
+    condition     = aws_sqs_queue.video_processing_dlq.name == "video-processing-dlq-prod"
+    error_message = "Expected the DLQ to keep the converter contract name video-processing-dlq + environment suffix"
+  }
+
+  assert {
+    condition     = aws_sqs_queue.video_processing.visibility_timeout_seconds == 1800
+    error_message = "Expected a 1800s visibility timeout — the processing-worker runs ffmpeg on potentially long videos"
+  }
+
+  assert {
+    condition     = jsondecode(aws_sqs_queue.video_processing.redrive_policy).deadLetterTargetArn == aws_sqs_queue.video_processing_dlq.arn
+    error_message = "Expected the main queue's redrive_policy to point at its own DLQ arn, not some other queue"
+  }
+
+  assert {
+    condition     = jsondecode(aws_sqs_queue.video_processing.redrive_policy).maxReceiveCount == 3
+    error_message = "Expected maxReceiveCount to be 3 for the main queue's redrive policy"
+  }
+
+  assert {
+    condition     = jsondecode(aws_sqs_queue_policy.video_processing.policy).Statement[0].Condition.ArnEquals["aws:SourceArn"] == aws_sns_topic.video_upload_events.arn
+    error_message = "Expected the main queue policy to scope SendMessage to the video_upload_events topic's arn via aws:SourceArn (S3 notifies the topic, not the queue directly)"
+  }
+
+  assert {
+    condition     = aws_s3_bucket_notification.video_processor.topic[0].topic_arn == aws_sns_topic.video_upload_events.arn
+    error_message = "Expected the S3 notification to target the video_upload_events SNS topic, not a queue directly (two queues can't share the same suffix filter unambiguously)"
+  }
+
+  assert {
+    condition     = aws_s3_bucket_notification.video_processor.topic[0].filter_suffix == ".mp4"
+    error_message = "Expected the S3 notification to filter on .mp4 so the processed/ zip does not re-trigger the worker"
+  }
+}
+
+run "video_upload_confirmation_fans_out_from_same_s3_event" {
+  command = plan
+
+  # Same plan-time unknown-arn issue as the notification_events run block
+  # above — see the comment there for why these overrides are needed.
+  override_resource {
+    target = aws_sns_topic.video_upload_events
+    values = {
+      arn = "arn:aws:sns:us-east-1:123456789012:video-upload-events-topic-prod"
+    }
+    override_during = plan
+  }
+
+  override_resource {
+    target = aws_sqs_queue.video_processing
+    values = {
+      arn = "arn:aws:sqs:us-east-1:123456789012:video-processing-queue-prod"
+    }
+    override_during = plan
+  }
+
+  override_resource {
+    target = aws_sqs_queue.video_upload_confirmation
+    values = {
+      arn = "arn:aws:sqs:us-east-1:123456789012:video-upload-confirmation-queue-prod"
+    }
+    override_during = plan
+  }
+
+  override_resource {
+    target = aws_s3_bucket.video_processor
+    values = {
+      arn = "arn:aws:s3:::video-processor-bucket-prod"
+    }
+    override_during = plan
+  }
+
+  assert {
+    condition     = aws_sqs_queue.video_upload_confirmation.name == "video-upload-confirmation-queue-prod"
+    error_message = "Expected the upload-confirmation queue to follow the video-upload-confirmation-queue-${var.environment} convention"
+  }
+
+  assert {
+    condition     = aws_sqs_queue.video_upload_confirmation.visibility_timeout_seconds == 60
+    error_message = "Expected a 60s visibility timeout — links-service applies a fast idempotent DynamoDB transition per message, same as video_processing_status"
+  }
+
+  assert {
+    condition     = jsondecode(aws_sqs_queue_policy.video_upload_confirmation.policy).Statement[0].Condition.ArnEquals["aws:SourceArn"] == aws_sns_topic.video_upload_events.arn
+    error_message = "Expected the upload-confirmation queue policy to scope SendMessage to the video_upload_events topic's arn via aws:SourceArn"
+  }
+
+  assert {
+    condition     = jsondecode(aws_sns_topic_policy.video_upload_events.policy).Statement[0].Condition.ArnEquals["aws:SourceArn"] == aws_s3_bucket.video_processor.arn
+    error_message = "Expected the topic policy to scope sns:Publish to the video bucket's arn via aws:SourceArn, otherwise S3 can't be authorized to publish"
+  }
+
+  assert {
+    condition = length([
+      for s in [aws_sns_topic_subscription.video_upload_events_processing, aws_sns_topic_subscription.video_upload_events_confirmation]
+      : s if s.endpoint == aws_sqs_queue.video_processing.arn
+    ]) == 1
+    error_message = "Expected exactly one of the two SNS subscriptions to fan out to the worker's video_processing queue"
+  }
+
+  assert {
+    condition = length([
+      for s in [aws_sns_topic_subscription.video_upload_events_processing, aws_sns_topic_subscription.video_upload_events_confirmation]
+      : s if s.endpoint == aws_sqs_queue.video_upload_confirmation.arn
+    ]) == 1
+    error_message = "Expected exactly one of the two SNS subscriptions to fan out to the links-service video_upload_confirmation queue"
+  }
+}
+
+run "worker_ecr_and_artifacts_bucket_named_per_convention" {
+  command = plan
+
+  assert {
+    condition     = module.ecr_worker.repository_name == "video-processor-worker-prod"
+    error_message = "Expected the worker ECR repository name to follow the video-processor-worker-${var.environment} convention (the converter's deploy.yml pushes to this name)"
+  }
+
+  assert {
+    condition     = aws_s3_bucket.artifacts.bucket == "video-processor-artifacts-prod"
+    error_message = "Expected the deploy-artifacts bucket to follow the video-processor-artifacts-${var.environment} convention (the converter's CD uploads dlq-handler zips here)"
+  }
+}
+
 run "jwt_signing_key_secret_named_and_wired_per_spec" {
   command = plan
 
