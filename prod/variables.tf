@@ -11,13 +11,13 @@ variable "region" {
 }
 
 variable "datadog_api_key" {
-  description = "Datadog API key. Used by the Cluster Agent (k8s secret) and the Lambda log forwarder."
+  description = "Datadog API key (Organization Settings > API Keys). Usada pelo Cluster Agent (k8s secret) e pelo Lambda log forwarder. Nunca commitar um valor real — suprir via TF_VAR_datadog_api_key ou um .auto.tfvars fora do controle de versão."
   type        = string
   sensitive   = true
 }
 
 variable "datadog_site" {
-  description = "Datadog site to send data to (e.g. datadoghq.com, datadoghq.eu, us5.datadoghq.com)"
+  description = "Datadog site (ex.: datadoghq.com, datadoghq.eu, us5.datadoghq.com)"
   type        = string
   default     = "datadoghq.com"
 }
