@@ -66,6 +66,14 @@ resource "helm_release" "datadog" {
           portEnabled = true
         }
 
+        # Custom app metrics (users-api business flows) go out over DogStatsD
+        # UDP to the node's hostPort — same reasoning as APM's portEnabled
+        # above: pods reach the Agent via DD_AGENT_HOST=status.hostIP, and
+        # the chart doesn't expose this hostPort by default.
+        dogstatsd = {
+          useHostPort = true
+        }
+
         logs = {
           enabled             = true
           containerCollectAll = true
