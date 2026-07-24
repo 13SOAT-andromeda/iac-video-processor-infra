@@ -219,14 +219,19 @@ resource "aws_sns_topic_policy" "video_upload_events" {
   })
 }
 
+# raw_message_delivery = true — ver comentário na versão prod deste arquivo
+# (sem isso, o worker recebe o envelope SNS em vez do evento S3 cru que o
+# json.Unmarshal dele espera, e falha silenciosamente).
 resource "aws_sns_topic_subscription" "video_upload_events_processing" {
-  topic_arn = aws_sns_topic.video_upload_events.arn
-  protocol  = "sqs"
-  endpoint  = aws_sqs_queue.video_processing.arn
+  topic_arn            = aws_sns_topic.video_upload_events.arn
+  protocol             = "sqs"
+  endpoint             = aws_sqs_queue.video_processing.arn
+  raw_message_delivery = true
 }
 
 resource "aws_sns_topic_subscription" "video_upload_events_confirmation" {
-  topic_arn = aws_sns_topic.video_upload_events.arn
-  protocol  = "sqs"
-  endpoint  = aws_sqs_queue.video_upload_confirmation.arn
+  topic_arn            = aws_sns_topic.video_upload_events.arn
+  protocol             = "sqs"
+  endpoint             = aws_sqs_queue.video_upload_confirmation.arn
+  raw_message_delivery = true
 }

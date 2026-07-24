@@ -230,14 +230,26 @@ resource "aws_sns_topic_policy" "video_upload_events" {
   })
 }
 
+# raw_message_delivery = true é essencial aqui: sem ela, o SQS recebe o
+# evento S3 envelopado num JSON de notificação do SNS ({"Type":"Notification",
+# ...,"Message":"<s3 event como string escapada>"}), e o worker
+# (video-processor-converter, lambda/worker_handler.go) faz
+# json.Unmarshal(rec.Body, &events.S3Event{}) esperando o evento S3 cru — o
+# envelope SNS não bate com esse shape, s3ev.Records fica vazio em silêncio
+# (sem erro) e a mensagem é deletada sem processar nada. Com raw delivery
+# habilitada, o SQS recebe o payload original do S3, idêntico ao que a
+# notification config antiga entregava direto (sem SNS no meio) — zero
+# mudança necessária no código do worker.
 resource "aws_sns_topic_subscription" "video_upload_events_processing" {
-  topic_arn = aws_sns_topic.video_upload_events.arn
-  protocol  = "sqs"
-  endpoint  = aws_sqs_queue.video_processing.arn
+  topic_arn            = aws_sns_topic.video_upload_events.arn
+  protocol             = "sqs"
+  endpoint             = aws_sqs_queue.video_processing.arn
+  raw_message_delivery = true
 }
 
 resource "aws_sns_topic_subscription" "video_upload_events_confirmation" {
-  topic_arn = aws_sns_topic.video_upload_events.arn
-  protocol  = "sqs"
-  endpoint  = aws_sqs_queue.video_upload_confirmation.arn
+  topic_arn            = aws_sns_topic.video_upload_events.arn
+  protocol             = "sqs"
+  endpoint             = aws_sqs_queue.video_upload_confirmation.arn
+  raw_message_delivery = true
 }
