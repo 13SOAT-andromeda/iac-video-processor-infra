@@ -30,6 +30,12 @@ mock_provider "aws" {
       token = "mock-token"
     }
   }
+
+  mock_data "aws_caller_identity" {
+    defaults = {
+      account_id = "123456789012"
+    }
+  }
 }
 
 # datadog.tf declares the kubernetes/helm providers at root module level, so
@@ -336,7 +342,7 @@ run "video_processing_pipeline_wired_per_converter_contract" {
   override_resource {
     target = aws_s3_bucket.video_processor
     values = {
-      arn = "arn:aws:s3:::video-processor-bucket-prod"
+      arn = "arn:aws:s3:::video-processor-bucket-prod-123456789012"
     }
     override_during = plan
   }
@@ -350,8 +356,8 @@ run "video_processing_pipeline_wired_per_converter_contract" {
   }
 
   assert {
-    condition     = aws_s3_bucket.video_processor.bucket == "video-processor-bucket-prod"
-    error_message = "Expected the video bucket to follow the video-processor-bucket-${var.environment} convention"
+    condition     = aws_s3_bucket.video_processor.bucket == "video-processor-bucket-prod-123456789012"
+    error_message = "Expected the video bucket to follow the video-processor-bucket-<environment>-<account_id> convention (account_id suffix avoids cross-account global-name collisions)"
   }
 
   assert {
@@ -427,7 +433,7 @@ run "video_upload_confirmation_fans_out_from_same_s3_event" {
   override_resource {
     target = aws_s3_bucket.video_processor
     values = {
-      arn = "arn:aws:s3:::video-processor-bucket-prod"
+      arn = "arn:aws:s3:::video-processor-bucket-prod-123456789012"
     }
     override_during = plan
   }
@@ -478,8 +484,8 @@ run "worker_ecr_and_artifacts_bucket_named_per_convention" {
   }
 
   assert {
-    condition     = aws_s3_bucket.artifacts.bucket == "video-processor-artifacts-prod"
-    error_message = "Expected the deploy-artifacts bucket to follow the video-processor-artifacts-${var.environment} convention (the converter's CD uploads dlq-handler zips here)"
+    condition     = aws_s3_bucket.artifacts.bucket == "video-processor-artifacts-prod-123456789012"
+    error_message = "Expected the deploy-artifacts bucket to follow the video-processor-artifacts-<environment>-<account_id> convention (the converter's CD uploads dlq-handler zips here)"
   }
 }
 

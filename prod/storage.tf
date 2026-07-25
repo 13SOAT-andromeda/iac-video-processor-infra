@@ -1,9 +1,14 @@
+# S3 bucket names are globally unique; a bare "video-processor-bucket-${env}"
+# collided with another AWS Academy Lab account during a prior apply. The
+# converter's own Terraform (data.tf) already expects the account_id suffix.
+data "aws_caller_identity" "current" {}
+
 # Bucket de vídeos (contrato do video-processor-converter): uploads .mp4 disparam
 # o tópico video_upload_events (messaging.tf); o worker grava o .zip de frames
 # em processed/. O filtro por sufixo .mp4 evita que o .zip gerado re-dispare o
 # worker (que também se protege via ErrNotRawKey).
 resource "aws_s3_bucket" "video_processor" {
-  bucket = "video-processor-bucket-${var.environment}"
+  bucket = "video-processor-bucket-${var.environment}-${data.aws_caller_identity.current.account_id}"
 
   tags = {
     Project     = "video-processor"
@@ -33,7 +38,7 @@ resource "aws_s3_bucket_notification" "video_processor" {
 # o zip do dlq-handler (dlq-handler/<sha>.zip e latest.zip), consumido pelo
 # Terraform de Lambdas daquele repo.
 resource "aws_s3_bucket" "artifacts" {
-  bucket = "video-processor-artifacts-${var.environment}"
+  bucket = "video-processor-artifacts-${var.environment}-${data.aws_caller_identity.current.account_id}"
 
   tags = {
     Project     = "video-processor"
