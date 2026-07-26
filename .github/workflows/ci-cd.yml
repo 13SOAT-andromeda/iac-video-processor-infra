@@ -1,0 +1,16 @@
+name: CI/CD
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  terraform:
+    uses: 13SOAT-andromeda/tech-andromeda-ci-config/.github/workflows/reusable-terraform-cd.yml@v1
+    with:
+      terraform-dir: prod
+      run-tests: true
+      datadog-api-key-var-name: datadog_api_key
+    secrets: inherit
