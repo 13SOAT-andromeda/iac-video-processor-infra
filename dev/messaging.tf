@@ -104,13 +104,6 @@ resource "aws_sqs_queue_policy" "user_events" {
   })
 }
 
-# Fila de status de processamento de vídeo (etapa links — arquitetura §6).
-# Publicada pelo processing-worker (video-processor-converter) e pelo futuro
-# DLQ handler; consumida pelo links-service (video-processor-link-api, pod EKS,
-# consumer goroutine contínuo). Nome mantém o contrato da spec de arquitetura
-# (video-processing-status-queue) + sufixo de ambiente do repo.
-# Sem DLQ própria por decisão de arquitetura (ADR-003, adendo v5): o
-# links-service é o dono do estado e trata erros de consumo internamente.
 resource "aws_sqs_queue" "video_processing_status" {
   name                       = "video-processing-status-queue-${var.environment}"
   visibility_timeout_seconds = 60
@@ -121,13 +114,6 @@ resource "aws_sqs_queue" "video_processing_status" {
   }
 }
 
-# Fila principal de processamento de vídeo (contrato do video-processor-converter):
-# alimentada pela notificação S3 de upload .mp4 (ver storage.tf, via SNS
-# fan-out video_upload_events) e consumida pelo processing-worker. Visibility
-# de 20s (vs 1800s em prod) para retries rápidos na iteração local; após 3
-# falhas a mensagem vai para a DLQ, consumida pelo dlq-handler. Nomes mantêm
-# o contrato da spec (video-processing-queue / video-processing-dlq) +
-# sufixo de ambiente do repo.
 resource "aws_sqs_queue" "video_processing_dlq" {
   name = "video-processing-dlq-${var.environment}"
 
@@ -166,8 +152,6 @@ resource "aws_sqs_queue_policy" "video_processing" {
   })
 }
 
-# Fila de confirmação de upload (etapa links) — ver comentário na versão
-# prod deste arquivo. Sem DLQ própria (ADR-003, adendo v5).
 resource "aws_sqs_queue" "video_upload_confirmation" {
   name                       = "video-upload-confirmation-queue-${var.environment}"
   visibility_timeout_seconds = 20
@@ -192,8 +176,6 @@ resource "aws_sqs_queue_policy" "video_upload_confirmation" {
   })
 }
 
-# Tópico de fan-out do evento de upload bruto — ver comentário na versão
-# prod deste arquivo.
 resource "aws_sns_topic" "video_upload_events" {
   name = "video-upload-events-topic-${var.environment}"
 
@@ -203,8 +185,6 @@ resource "aws_sns_topic" "video_upload_events" {
   }
 }
 
-# S3 precisa de permissão explícita de Publish no tópico — ver comentário na
-# versão prod deste arquivo.
 resource "aws_sns_topic_policy" "video_upload_events" {
   arn = aws_sns_topic.video_upload_events.arn
   policy = jsonencode({
@@ -219,9 +199,6 @@ resource "aws_sns_topic_policy" "video_upload_events" {
   })
 }
 
-# raw_message_delivery = true — ver comentário na versão prod deste arquivo
-# (sem isso, o worker recebe o envelope SNS em vez do evento S3 cru que o
-# json.Unmarshal dele espera, e falha silenciosamente).
 resource "aws_sns_topic_subscription" "video_upload_events_processing" {
   topic_arn            = aws_sns_topic.video_upload_events.arn
   protocol             = "sqs"
