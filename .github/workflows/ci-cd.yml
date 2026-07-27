@@ -35,5 +35,37 @@ jobs:
           aws-region: ${{ secrets.AWS_REGION }}
       - name: Update kubeconfig
         run: aws eks update-kubeconfig --region ${{ secrets.AWS_REGION }} --name video-processor-eks-prod
+      - name: Install/upgrade AWS Load Balancer Controller
+        run: |
+          VPC_ID=$(aws eks describe-cluster --name video-processor-eks-prod --query 'cluster.resourcesVpcConfig.vpcId' --output text)
+
+          kubectl delete secret aws-alb-credentials -n kube-system --ignore-not-found
+          kubectl create secret generic aws-alb-credentials -n kube-system \
+            --from-literal=AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" \
+            --from-literal=AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+            --from-literal=AWS_SESSION_TOKEN="$AWS_SESSION_TOKEN" \
+            --from-literal=AWS_REGION="$AWS_REGION"
+
+          helm repo add eks https://aws.github.io/eks-charts
+          helm repo update eks
+          helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \
+            -n kube-system \
+            --set clusterName=video-processor-eks-prod \
+            --set serviceAccount.create=true \
+            --set region="$AWS_REGION" \
+            --set vpcId="$VPC_ID" \
+            --set "envFrom[0].secretRef.name=aws-alb-credentials" \
+            --wait
       - name: Apply shared ALB ingress
         run: kubectl apply -f k8s/ingress.yaml
+      - name: Wait for ALB to be provisioned
+        run: |
+          for _ in $(seq 1 30); do
+            ADDR=$(kubectl get ingress video-processor-ingress -n default -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
+            if [ -n "$ADDR" ]; then
+              echo "ALB ready: $ADDR"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::warning::ALB not provisioned within 5 minutes — check the AWS Load Balancer Controller logs"
