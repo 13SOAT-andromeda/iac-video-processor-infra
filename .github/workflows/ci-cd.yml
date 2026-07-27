@@ -17,3 +17,23 @@ jobs:
       run-tests: true
       datadog-api-key-var-name: datadog_api_key
     secrets: inherit
+
+  apply-ingress:
+    needs: terraform
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: aws-prod
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: 13SOAT-andromeda/tech-andromeda-ci-config/actions/configure-aws-session@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+      - name: Update kubeconfig
+        run: aws eks update-kubeconfig --region ${{ secrets.AWS_REGION }} --name video-processor-eks-prod
+      - name: Apply shared ALB ingress
+        run: kubectl apply -f k8s/ingress.yaml
