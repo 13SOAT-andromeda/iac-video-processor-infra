@@ -371,8 +371,8 @@ run "video_processing_pipeline_wired_per_converter_contract" {
   }
 
   assert {
-    condition     = aws_sqs_queue.video_processing.visibility_timeout_seconds == 1800
-    error_message = "Expected a 1800s visibility timeout — the processing-worker runs ffmpeg on potentially long videos"
+    condition     = aws_sqs_queue.video_processing.visibility_timeout_seconds == 300
+    error_message = "Expected a 300s visibility timeout — the processing-worker runs ffmpeg on potentially long videos"
   }
 
   assert {
