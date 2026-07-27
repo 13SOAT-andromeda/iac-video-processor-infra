@@ -113,12 +113,12 @@ run "datadog_tags_use_org_governed_keys" {
   }
 }
 
-run "datadog_site_defaults_to_us1" {
+run "datadog_site_defaults_to_us5" {
   command = plan
 
   assert {
-    condition     = var.datadog_site == "datadoghq.com"
-    error_message = "Expected the default Datadog site to be datadoghq.com (US1) unless overridden"
+    condition     = var.datadog_site == "us5.datadoghq.com"
+    error_message = "Expected the default Datadog site to be us5.datadoghq.com — this org's Datadog account lives on us5, not the generic datadoghq.com (US1) site"
   }
 }
 
