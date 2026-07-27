@@ -19,7 +19,7 @@ variable "datadog_api_key" {
 variable "datadog_site" {
   description = "Datadog site (ex.: datadoghq.com, datadoghq.eu, us5.datadoghq.com)"
   type        = string
-  default     = "datadoghq.com"
+  default     = "us5.datadoghq.com"
 }
 
 variable "enable_downstream_log_forwarding" {
