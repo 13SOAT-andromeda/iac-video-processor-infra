@@ -1,7 +1,4 @@
 locals {
-  # No LabRole in LocalStack — omits create_iam_role/iam_role_arn so the
-  # module falls back to its default (create_iam_role = true), unlike
-  # prod/eks.tf which pins these to LabRole.
   node_group_config = {
     users = {
       instance_types = ["t3.medium"]

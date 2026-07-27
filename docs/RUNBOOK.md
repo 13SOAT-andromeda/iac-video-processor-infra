@@ -351,7 +351,7 @@ curl -s "$API/links/$LINK_ID/download" -H "Authorization: Bearer $JWT_TOKEN"
 
 Repita os passos 1-4 pra `sample_1080p.mp4` (sucesso, no limite exato aceito) e `sample_1440p.mp4` (espera `PROCESSING_FAILED`/`invalid_resolution` em ~10s, sem passar pela DLQ — é rejeição de negócio numa única invocação, não um erro transitório).
 
-**Caso da DLQ (`invalid_video.mp4`):** o `video-processing-queue` em prod tem `visibility_timeout_seconds = 1800` e `maxReceiveCount = 3` — o worker falha o `ffprobe` (garbage não é container de vídeo válido), pede retry, e só cai na `video-processing-dlq` depois de **~90min** (3 tentativas × 30min). O `dlq-handler` então publica `PROCESSING_FAILED`/`max_retries_exceeded` (se o passo 2.5 estiver ativo, chega um e-mail real também). Suba esse arquivo **primeiro**, em paralelo com o resto do teste, pra não bloquear — ou pule esse caso se não tiver 90min disponíveis.
+**Caso da DLQ (`invalid_video.mp4`):** o `video-processing-queue` em prod tem `visibility_timeout_seconds = 300` e `maxReceiveCount = 3` — o worker falha o `ffprobe` (garbage não é container de vídeo válido), pede retry, e só cai na `video-processing-dlq` depois de **~90min** (3 tentativas × 30min). O `dlq-handler` então publica `PROCESSING_FAILED`/`max_retries_exceeded` (se o passo 2.5 estiver ativo, chega um e-mail real também). Suba esse arquivo **primeiro**, em paralelo com o resto do teste, pra não bloquear — ou pule esse caso se não tiver 90min disponíveis.
 
 ---
 
