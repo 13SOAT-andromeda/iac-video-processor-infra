@@ -164,12 +164,3 @@ terraform test
 
 - [`infra_unit_test.tftest.hcl`](prod/tests/infra_unit_test.tftest.hcl) — asserts sobre VPC, EKS, ECR, mensageria, storage e secrets.
 - [`datadog_unit_test.tftest.hcl`](prod/tests/datadog_unit_test.tftest.hcl) — asserts sobre o Agent/Helm, forwarder e DBM.
-
----
-
-## 7. Decisões e limitações relevantes
-
-- **AWS Academy Learner Lab**: a conta reseta periodicamente (novo account ID, tudo apagado). O runbook parte de conta zerada e nada é hardcoded de sessões anteriores. `iam:CreateRole` é negado — tudo roda com a `LabRole` (sem IRSA), o que motivou o hop limit 2 do IMDSv2 no launch template.
-- **Fan-out SNS do upload** (`video-upload-events-topic`): o S3 não permite dois destinos SQS com o mesmo filtro de sufixo na mesma notification config; o tópico único replica o `ObjectCreated` para worker e link-api, com `raw_message_delivery = true` para manter o payload S3 cru que o worker espera.
-- **`jwt-signing-key`**: gerado aqui e lido por nome pelos repos consumidores — nenhum serviço emite ou valida JWT com segredo próprio.
-- **Ingress fora do Terraform**: o `k8s/ingress.yaml` depende do AWS Load Balancer Controller (instalado via Helm no runbook), por isso é aplicado com `kubectl` e não entra no state.
