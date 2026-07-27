@@ -19,15 +19,7 @@ variable "datadog_api_key" {
 variable "datadog_site" {
   description = "Datadog site (ex.: datadoghq.com, datadoghq.eu, us5.datadoghq.com)"
   type        = string
-  # O org Datadog deste projeto vive em us5, não no default genérico
-  # datadoghq.com — nenhuma pipeline sobrescreve essa var com -var, então um
-  # default errado aqui faz o Cluster Agent (helm_release.datadog acima)
-  # enviar tudo (traces/logs/DogStatsD do users-api, DBM do Postgres) para
-  # um site que ninguém deste org enxerga. Confirmado ao vivo via
-  # `helm get values datadog -n default` -> site: datadoghq.com, zero dados
-  # recentes no Datadog. video-processor-converter evita esse problema
-  # hardcodando "us5.datadoghq.com" direto no Lambda, sem passar por var.
-  default = "us5.datadoghq.com"
+  default     = "us5.datadoghq.com"
 }
 
 variable "enable_downstream_log_forwarding" {
